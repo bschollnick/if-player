@@ -1,0 +1,401 @@
+/* Standalone IF Player shell styling.
+   Two layouts share this one stylesheet: "classic" hides #game-panel and
+   #centre-header/#centre-footer entirely (single story column); "three_column"
+   shows them. Toggled by app.js's applyLayout() via a body class. */
+
+:root {
+  color-scheme: light dark;
+  --bg: #ffffff;
+  --fg: #1a1a1a;
+  --muted: #6b6b6b;
+  --border: #d8d8d8;
+  --accent: #2a5adf;
+  --accent-fg: #ffffff;
+  --panel-bg: #f5f5f7;
+  --danger: #b3261e;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #1a1a1c;
+    --fg: #e8e8ea;
+    --muted: #9a9a9e;
+    --border: #38383c;
+    --accent: #5b8dfd;
+    --accent-fg: #0d1220;
+    --panel-bg: #232326;
+    --danger: #ff6b60;
+  }
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--fg);
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  line-height: 1.5;
+}
+
+button {
+  font: inherit;
+  cursor: pointer;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  background: var(--bg);
+  color: var(--fg);
+  padding: 0.5em 1em;
+}
+
+button:hover { border-color: var(--accent); }
+button:disabled { opacity: 0.5; cursor: default; }
+
+.button-primary {
+  background: var(--accent);
+  color: var(--accent-fg);
+  border-color: var(--accent);
+}
+
+.button-ghost {
+  background: transparent;
+}
+
+code {
+  background: var(--panel-bg);
+  padding: 0.1em 0.4em;
+  border-radius: 4px;
+}
+
+/* -- Library / open-folder view ------------------------------------- */
+
+#library-view {
+  max-width: 40em;
+  margin: 4em auto;
+  padding: 0 1.5em;
+  text-align: center;
+}
+
+#library-view .hint { color: var(--muted); }
+
+.error { color: var(--danger); }
+
+/* -- Trust prompt ----------------------------------------------------- */
+
+#trust-prompt {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 10;
+}
+
+.trust-box {
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 2em;
+  max-width: 32em;
+}
+
+.trust-buttons {
+  display: flex;
+  gap: 0.75em;
+  justify-content: flex-end;
+  margin-top: 1.5em;
+}
+
+/* -- Play view: three-region layout ------------------------------------ */
+
+#play-view {
+  display: grid;
+  grid-template-columns: 12em minmax(0, 1fr);
+  min-height: 100vh;
+}
+
+body.layout-three_column #play-view {
+  grid-template-columns: 12em minmax(0, 1fr) 18em;
+}
+
+#sidebar {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5em;
+  padding: 1em;
+  border-right: 1px solid var(--border);
+}
+
+#sidebar button { text-align: left; }
+
+#story-column {
+  padding: 1.5em 2em 4em;
+  max-width: 46em;
+}
+
+body.layout-three_column #story-column { max-width: none; }
+
+#story-title { margin-top: 0; }
+
+.centre-stats {
+  display: flex;
+  gap: 1.5em;
+  flex-wrap: wrap;
+  padding: 0.5em 0;
+  border-bottom: 1px solid var(--border);
+  margin-bottom: 1em;
+  color: var(--muted);
+  font-size: 0.9em;
+}
+
+.centre-stat-label { margin-right: 0.35em; }
+.centre-stat-value { color: var(--fg); font-weight: 600; }
+
+#transcript {
+  color: var(--muted);
+  border-bottom: 1px solid var(--border);
+  margin-bottom: 1em;
+  padding-bottom: 1em;
+}
+
+#transcript .transcript-choice { font-style: italic; }
+#transcript hr { border: none; border-top: 1px dashed var(--border); margin: 1em 0; }
+
+.turn-divider {
+  text-align: center;
+  color: var(--muted);
+  font-size: 0.85em;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  margin: 1em 0;
+  position: relative;
+}
+
+.turn-divider::before {
+  content: "";
+  position: absolute;
+  top: 50%;
+  left: 0;
+  right: 0;
+  border-top: 1px solid var(--border);
+  z-index: 0;
+}
+
+.turn-divider span {
+  background: var(--bg);
+  padding: 0 0.75em;
+  position: relative;
+  z-index: 1;
+}
+
+#story-images { display: flex; flex-wrap: wrap; gap: 0.75em; margin-bottom: 1em; }
+#story-images img, #story-images video { max-width: 100%; border-radius: 8px; }
+
+#story-text p { margin: 0 0 1em; }
+
+.notification {
+  background: var(--panel-bg);
+  border-radius: 8px;
+  padding: 1em 1.25em;
+  margin-top: 1em;
+}
+
+.choices-message {
+  border: 1px solid var(--accent);
+  border-radius: 8px;
+  margin-top: 1em;
+  overflow: hidden;
+}
+
+.choices-message .message-header {
+  background: var(--accent);
+  color: var(--accent-fg);
+  padding: 0.5em 1em;
+  font-weight: 600;
+}
+
+.choices-message .message-header p { margin: 0; }
+
+.choices-buttons {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5em;
+  padding: 1em;
+}
+
+.choice-button {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  text-align: left;
+}
+
+.choice-key {
+  background: var(--panel-bg);
+  border-radius: 4px;
+  padding: 0.1em 0.5em;
+  font-size: 0.85em;
+  color: var(--muted);
+  margin-left: 0.75em;
+}
+
+/* -- Game panel (three_column layout only) ------------------------------ */
+
+#game-panel {
+  border-left: 1px solid var(--border);
+  padding: 1em;
+  background: var(--panel-bg);
+}
+
+.panel-tabs {
+  display: flex;
+  gap: 0.35em;
+  margin-bottom: 1em;
+}
+
+.panel-tabs button.is-active {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.panel-section { margin-bottom: 1.25em; }
+.panel-heading { margin: 0 0 0.5em; font-size: 0.95em; text-transform: uppercase; letter-spacing: 0.04em; color: var(--muted); }
+
+.panel-list { list-style: none; margin: 0; padding: 0; }
+
+.panel-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 0.35em 0;
+  border-bottom: 1px solid var(--border);
+}
+
+.panel-row.panel-row-emphasis { font-weight: 600; }
+
+.panel-badge {
+  background: var(--accent);
+  color: var(--accent-fg);
+  border-radius: 999px;
+  padding: 0 0.5em;
+  font-size: 0.75em;
+}
+
+.panel-actions button {
+  padding: 0.2em 0.5em;
+  margin-left: 0.25em;
+}
+
+.panel-empty { color: var(--muted); font-size: 0.9em; }
+
+#panel-detail { font-size: 0.9em; }
+
+/* -- Sidebar save status toast (quicksave/quickload) --------------------- */
+
+.save-status {
+  font-size: 0.8em;
+  color: var(--muted);
+  margin: 0.25em 0 0;
+}
+
+/* -- Save-slot manager modal -------------------------------------------- */
+
+#saves-modal {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 20;
+}
+
+.saves-box {
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 1.5em 2em;
+  width: min(34em, 90vw);
+  max-height: 80vh;
+  overflow-y: auto;
+}
+
+.saves-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.saves-header h2 { margin: 0; }
+
+.saves-list { list-style: none; margin: 1em 0; padding: 0; }
+
+.save-slot-row {
+  display: flex;
+  align-items: center;
+  gap: 0.5em;
+  padding: 0.6em 0;
+  border-bottom: 1px solid var(--border);
+}
+
+.save-slot-info { flex: 1; min-width: 0; }
+.save-slot-info .slot-label { font-weight: 600; }
+.save-slot-info .slot-meta { color: var(--muted); font-size: 0.85em; }
+
+.save-slot-row button { font-size: 0.85em; padding: 0.3em 0.7em; }
+
+kbd {
+  background: var(--panel-bg);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 0.05em 0.4em;
+  font-family: inherit;
+  font-size: 0.9em;
+}
+
+/* -- Reader settings: font size / text width ---------------------------
+   Matches play_classic.jinja's own if-font-<size>/if-width-<width>
+   classes, applied to <body> by app.js's own applyReaderPrefs(). */
+
+body.if-font-small #story-column { font-size: 0.9em; }
+body.if-font-medium #story-column { font-size: 1em; }
+body.if-font-large #story-column { font-size: 1.2em; }
+
+body.if-width-narrow #story-column { max-width: 32em; }
+body.if-width-medium #story-column { max-width: 46em; }
+body.if-width-wide #story-column { max-width: 62em; }
+
+body.layout-three_column.if-width-narrow #story-column,
+body.layout-three_column.if-width-medium #story-column,
+body.layout-three_column.if-width-wide #story-column {
+  max-width: none;
+}
+
+#settings-modal {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 20;
+}
+
+.settings-box {
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 1.5em 2em;
+  width: min(24em, 90vw);
+}
+
+.settings-box fieldset {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  margin: 1em 0 0;
+  padding: 0.75em 1em;
+}
+
+.settings-box legend { padding: 0 0.4em; color: var(--muted); }
+.settings-box label { display: block; padding: 0.3em 0; cursor: pointer; }

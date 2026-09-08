@@ -1,0 +1,69 @@
+[project]
+name = "if-player"
+version = "0.1.0"
+description = "A standalone, native desktop Ink interactive-fiction player -- a thin pywebview shell over ink_engine"
+readme = "README.md"
+authors = [
+    {name = "Benjamin Schollnick",email = "Benjamin@schollnick.net"}
+]
+requires-python = ">=3.12,<3.15"
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+]
+dependencies = [
+    "pywebview (>=6.2.1,<7.0.0)",
+    "ink-engine",
+]
+
+[tool.poetry]
+packages = [{ include = "if_player" }]
+
+[tool.poetry.scripts]
+if-player = "if_player.main:main"
+
+[tool.poetry.dependencies]
+ink-engine = {path = "../interactive_fiction", develop = true}
+
+[build-system]
+requires = ["poetry-core>=2.0.0,<3.0.0"]
+build-backend = "poetry.core.masonry.api"
+
+[dependency-groups]
+dev = [
+    "pytest (>=9.0.2,<10.0.0)",
+    "pytest-cov (>=7.1.0,<8.0.0)",
+    "mypy (>=2.0.0,<3.0.0)",
+    "black (>=26,<27)",
+    "isort (>=6.0.0)",
+    "pylint (>=4.0.5,<5.0.0)"
+]
+
+[tool.black]
+line-length = 150
+
+[tool.isort]
+profile = "black"
+src_paths = ["if_player", "tests"]
+skip_gitignore = true
+
+[tool.mypy]
+python_version = "3.14"
+explicit_package_bases = true
+pretty = true
+color_output = true
+ignore_missing_imports = true
+mypy_path = "."
+
+[tool.pylint]
+max-line-length = 150
+# No pylint_django / django-settings-module / mypy_django_plugin here --
+# this project has no Django dependency, matching ink_engine's own posture.
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+python_classes = ["Test*"]
+python_functions = ["test_*"]
+addopts = "--tb=short --strict-markers"

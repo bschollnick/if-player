@@ -1,0 +1,133 @@
+<!DOCTYPE html>
+<!--
+  Standalone IF Player shell -- the static HTML/CSS/JS UI.
+
+  This page is loaded by pywebview via a file:// URL (webview.settings
+  ['ALLOW_FILE_URLS'] = True, set once by if_player/main.py). Every piece
+  of state comes from PlayerAPI (if_player/player_api.py) through
+  window.pywebview.api.* calls -- app.js is the only script here, and it
+  never talks to a network. Two layouts (classic / three_column) are
+  one set of markup with a CSS class swap rather than two separate HTML
+  files -- see app.js's own applyBodyClasses().
+-->
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>IF Player</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<div id="library-view">
+  <h1>Open a Game</h1>
+  <p class="hint">Choose a game folder (containing a compiled <code>.inkj</code> file) to begin.</p>
+  <button id="open-folder-button" type="button">Open Game Folder&hellip;</button>
+  <p id="library-error" class="error" hidden></p>
+</div>
+
+<div id="trust-prompt" hidden>
+  <div class="trust-box">
+    <h2>This game wants to run its own code</h2>
+    <p>The folder <code id="trust-folder-name"></code> declares plugins it
+       needs active. Plugins are real Python code the game folder ships --
+       trusting this folder lets that code run.</p>
+    <p>Only trust folders you downloaded from a source you trust.</p>
+    <div class="trust-buttons">
+      <button id="trust-decline" type="button" class="button-ghost">Play Without Trusting</button>
+      <button id="trust-accept" type="button" class="button-primary">Trust This Folder</button>
+    </div>
+  </div>
+</div>
+
+<div id="play-view" hidden>
+  <nav id="sidebar">
+    <button id="back-to-library" type="button" title="Back to library">&larr; Library</button>
+    <button id="undo-button" type="button" title="Undo" hidden>&#8630; Undo</button>
+    <button id="restart-button" type="button" title="Restart">&#8635; Restart</button>
+    <button id="saves-button" type="button" title="Save / Load">&#128190; Save / Load</button>
+    <button id="settings-button" type="button" title="Reader settings">&#9881; Settings</button>
+    <p id="save-status" class="save-status" hidden></p>
+  </nav>
+
+  <main id="story-column">
+    <h1 id="story-title"></h1>
+    <div id="centre-header" class="centre-stats" hidden></div>
+
+    <div id="transcript"></div>
+    <div id="current-turn-divider" class="turn-divider" hidden><span>Current turn</span></div>
+
+    <div id="current-turn">
+      <div id="story-images"></div>
+      <div id="story-text" class="content"></div>
+    </div>
+
+    <div id="story-done" class="notification" hidden>
+      <p>The story has ended.</p>
+      <button id="done-library-button" type="button">Back to library</button>
+    </div>
+
+    <div id="story-stalled" class="notification" hidden>
+      <p>This story has no more choices to offer right now.</p>
+    </div>
+
+    <div id="choices-box" class="choices-message" hidden>
+      <div class="message-header"><p>Your Choices</p></div>
+      <div id="choices-list" class="choices-buttons"></div>
+    </div>
+
+    <div id="centre-footer" class="centre-stats" hidden></div>
+  </main>
+
+  <aside id="game-panel" hidden>
+    <div id="panel-tabs" class="panel-tabs" hidden></div>
+    <div id="panel-sections"></div>
+    <div id="panel-detail"></div>
+  </aside>
+</div>
+
+<!--
+  Save-slot manager: five numbered/labeled slots, plus export/import.
+  Quicksave/quickload (F5/F9) are a separate, single dedicated slot with
+  no UI of their own beyond the #save-status toast in the sidebar --
+  see app.js's own quicksave()/quickload() key handlers.
+-->
+<div id="saves-modal" hidden>
+  <div class="saves-box">
+    <div class="saves-header">
+      <h2>Save / Load</h2>
+      <button id="saves-close" type="button" class="button-ghost" title="Close">&times;</button>
+    </div>
+    <ul id="saves-list" class="saves-list"></ul>
+    <p class="hint">Quicksave/Quickload: <kbd>F5</kbd> / <kbd>F9</kbd></p>
+  </div>
+</div>
+
+<!--
+  Reader preferences: font size and text width. App-wide, not per-game --
+  one reader, one set of preferences, applied as CSS classes
+  (if-font-<size>/if-width-<width> on body).
+-->
+<div id="settings-modal" hidden>
+  <div class="settings-box">
+    <div class="saves-header">
+      <h2>Reader Settings</h2>
+      <button id="settings-close" type="button" class="button-ghost" title="Close">&times;</button>
+    </div>
+    <fieldset>
+      <legend>Font Size</legend>
+      <label><input type="radio" name="font-size" value="small"> Small</label>
+      <label><input type="radio" name="font-size" value="medium"> Medium</label>
+      <label><input type="radio" name="font-size" value="large"> Large</label>
+    </fieldset>
+    <fieldset>
+      <legend>Text Width</legend>
+      <label><input type="radio" name="text-width" value="narrow"> Narrow</label>
+      <label><input type="radio" name="text-width" value="medium"> Medium</label>
+      <label><input type="radio" name="text-width" value="wide"> Wide</label>
+    </fieldset>
+  </div>
+</div>
+
+<script src="app.js"></script>
+</body>
+</html>
