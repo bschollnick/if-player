@@ -109,13 +109,10 @@ class PlayerAPI(SaveSlotsAPI):
     def _quicksave_path(self, game_dir: Path) -> Path:
         """Return the one quicksave file path for a game folder.
 
-        A quicksave is a single dedicated slot outside the five numbered
-        `save_slots.py` slots (there is exactly one; a second quicksave
-        simply overwrites the first, matching a typical F5/F9 desktop-game
-        convention) -- kept in the same `save_slots`-named directory as
-        the numbered slots so listing a game's saves only ever needs to
-        look in one place, but under its own reserved filename rather
-        than a numbered one.
+        A single dedicated slot outside the five numbered `save_slots.py`
+        slots, under its own reserved filename in the same directory so
+        listing a game's saves only needs to look in one place. A second
+        quicksave simply overwrites the first.
 
         Args:
             game_dir: The game folder's real filesystem path.

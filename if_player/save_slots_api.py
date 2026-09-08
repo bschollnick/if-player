@@ -1,17 +1,12 @@
 """`SaveSlotsAPI` -- the named-save-slot and quicksave/quickload
 `js_api` methods, split out of `player_api.py` as its own module. A
-pure file-organization split -- no behavior differs from being declared
-directly on `PlayerAPI`, since `PlayerAPI` inherits this mixin and every
+pure file-organization split: `PlayerAPI` inherits this mixin, so every
 method here becomes a real `window.pywebview.api.<name>` method exactly
-as if it were declared there.
+as if declared directly on `PlayerAPI`.
 
-This mixin's methods reach into `self.session`/`self.settings_path`/
-`self._write_save()`/`self._session_context()`/`self._add_media_and_panel()`/
-`self._saves_dir()`/`self._quicksave_path()` -- all defined on
-`PlayerAPI` itself (`_saves_dir()`/`_quicksave_path()` are declared
-there since they derive from `settings_path`, the one piece of state
-`PlayerAPI.__init__` actually owns). This mixin is not meant to be used
-standalone; it exists only to be inherited by `PlayerAPI`.
+Reaches into `self.session`/`self.settings_path` and several
+underscore-prefixed helpers defined on `PlayerAPI` itself. Not meant to
+be used standalone.
 """
 
 from __future__ import annotations

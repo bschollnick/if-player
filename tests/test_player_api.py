@@ -130,9 +130,8 @@ class TrustTests(PlayerAPITestCase):
         self.assertTrue(fresh_api.is_trusted(str(SIMPLE_GAME)))
 
     def test_a_game_with_no_required_plugins_never_needs_a_trust_prompt(self):
-        """SIMPLE_GAME's own manifest declares no plugins at all -- trust
-        is irrelevant, matching the plan's own "no game code to run"
-        reasoning."""
+        """SIMPLE_GAME's own manifest declares no plugins at all, so
+        there's no game code to run and trust is irrelevant."""
         context = self.api.open_game(str(SIMPLE_GAME))
         self.assertFalse(context["needs_trust"])
 
@@ -161,8 +160,7 @@ class ReaderPrefsAPITests(PlayerAPITestCase):
 
     def test_prefs_are_app_wide_not_per_game(self):
         """Unlike trust (per-folder), reader prefs are one set of values
-        shared across every game, matching UserPreferences being a
-        per-user field with no per-story scoping."""
+        shared across every game."""
         self.api.open_game(str(SIMPLE_GAME))
         self.api.set_reader_prefs("large", "narrow")
         other_game_dir = self.tmp / "another_game"

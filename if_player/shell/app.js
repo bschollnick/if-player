@@ -131,16 +131,9 @@
   }
 
   function declineTrust() {
-    // Play anyway, untrusted -- open_game() re-checks trust and simply
-    // grants no bindings this time (matching an untrusted Story: the
-    // story still plays, EXTERNAL calls fall through to their Ink stub).
-    // The only way to force this path is to re-open with a settings
-    // write that never happens -- so instead we ask the story to open
-    // once more, accepting that a plugin-requiring game will keep
-    // re-prompting each session unless the player trusts it. This
-    // decline path simply returns to the library rather than pretending
-    // to play a game whose own manifest asked for capabilities we're
-    // refusing to grant.
+    // A plugin-requiring game keeps re-prompting each session until
+    // trusted, rather than playing with missing capabilities silently
+    // granted.
     showLibrary(null);
   }
 
@@ -233,9 +226,8 @@
   }
 
   function reopenAfterStale() {
-    // Same recovery play_submit()'s own 409 response asks the browser
-    // for: the turn moved on under us, so re-fetch the live state rather
-    // than trying to reconcile a stale response by hand.
+    // The turn moved on under us -- re-fetch the live state rather than
+    // trying to reconcile a stale response by hand.
     if (state.gameDir) openGame(state.gameDir);
   }
 
@@ -387,11 +379,9 @@
 
   // -- Reader preferences -------------------------------------------------
   //
-  // The standalone equivalent of views.preferences(): app-wide font-size/
-  // text-width, applied as CSS classes on <body> (applyBodyClasses()
-  // above). Radio inputs rather than a form submit -- each change is its
-  // own set_reader_prefs() call, applied to the live page immediately so
-  // the player sees the effect without a save/close round-trip.
+  // Each radio change is its own set_reader_prefs() call, applied to the
+  // live page immediately via applyBodyClasses() -- no separate save/
+  // close step.
 
   function openSettingsModal() {
     document.querySelectorAll('#settings-modal input[name="font-size"]').forEach(function (input) {

@@ -354,9 +354,9 @@ kbd {
   font-size: 0.9em;
 }
 
-/* -- Reader settings: font size / text width ---------------------------
-   Matches play_classic.jinja's own if-font-<size>/if-width-<width>
-   classes, applied to <body> by app.js's own applyReaderPrefs(). */
+/* -- Reader settings: font size / text width -----------------------------
+   if-font-<size>/if-width-<width> classes, applied to <body> by app.js's
+   own applyBodyClasses(). */
 
 body.if-font-small #story-column { font-size: 0.9em; }
 body.if-font-medium #story-column { font-size: 1em; }

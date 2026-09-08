@@ -1,14 +1,11 @@
 """A small local JSON settings store -- per-folder trust decisions, and
 app-wide reader preferences (font size / text width).
 
-The trust half persists a "safe by default, explicit human action
-required" decision to a plain JSON file in the OS's own per-user config
-directory, keyed by each game folder's own resolved absolute path. A
-desktop app has no admin panel to flip a per-game trust flag in, so
-this is the whole gate -- there is no separate global "engine enabled"
-toggle, since there is no "other games on this installation" concept
-for a single desktop session to protect against; per-folder trust is
-already the complete gate.
+The trust half persists a safe-by-default, explicit-consent decision to
+a plain JSON file in the OS's own per-user config directory, keyed by
+each game folder's own resolved absolute path -- there is no separate
+global "engine enabled" toggle, since per-folder trust is already the
+complete gate.
 
 The reader-preferences half is app-wide rather than per-game-folder --
 one reader, one set of preferences, applied to every game the same way.

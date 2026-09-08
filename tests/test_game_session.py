@@ -24,7 +24,7 @@ SIMPLE_GAME = FIXTURES / "simple_game"
 
 
 class OpenGameTests(TestCase):
-    """The standalone equivalent of views.play()'s two branches, merged."""
+    """Opening a game folder, both fresh and resumed from a save."""
 
     def test_a_fresh_game_starts_with_the_opening_turn_already_run(self):
         session = open_game(SIMPLE_GAME, saved_state=None, plugins={}, active_plugin_names=[], trusted=False)
@@ -51,7 +51,7 @@ class OpenGameTests(TestCase):
 
 
 class ChooseTests(TestCase):
-    """The standalone equivalent of views.play_submit()."""
+    """Applying a choice and advancing the story."""
 
     def setUp(self):
         self.session = open_game(SIMPLE_GAME, saved_state=None, plugins={}, active_plugin_names=[], trusted=False)
@@ -100,7 +100,7 @@ class ChooseTests(TestCase):
 
 
 class UndoTests(TestCase):
-    """The standalone equivalent of views.play_undo()."""
+    """Restoring the one-level undo snapshot."""
 
     def setUp(self):
         self.session = open_game(SIMPLE_GAME, saved_state=None, plugins={}, active_plugin_names=[], trusted=False)
@@ -139,7 +139,7 @@ class UndoTests(TestCase):
 
 
 class RestartTests(TestCase):
-    """The standalone equivalent of views.play_restart()."""
+    """Discarding any saved state and starting over."""
 
     def test_restart_produces_a_fresh_session_regardless_of_prior_progress(self):
         session = open_game(SIMPLE_GAME, saved_state=None, plugins={}, active_plugin_names=[], trusted=False)
