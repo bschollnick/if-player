@@ -10,6 +10,7 @@ from unittest import TestCase
 from if_player.save_slots import (
     MAX_SAVE_SLOTS,
     SaveSlotError,
+    delete_slot,
     export_slot,
     import_slot,
     list_slots,
@@ -132,3 +133,26 @@ class ExportImportSlotTests(SaveSlotsTestCase):
         envelope = export_slot(self.saves_dir, other_game, 0)
         with self.assertRaises(SaveSlotError):
             import_slot(self.saves_dir, self.game_dir, 0, envelope)
+
+
+class DeleteSlotTests(SaveSlotsTestCase):
+    def test_deleting_a_used_slot_empties_it(self):
+        save_slot(self.saves_dir, self.game_dir, 0, {"turn_count": 1}, "To be deleted")
+        delete_slot(self.saves_dir, self.game_dir, 0)
+        slots = list_slots(self.saves_dir, self.game_dir)
+        self.assertFalse(slots[0]["used"])
+
+    def test_deleting_an_already_empty_slot_is_not_an_error(self):
+        delete_slot(self.saves_dir, self.game_dir, 0)  # must not raise
+
+    def test_deleting_out_of_range_slot_raises(self):
+        with self.assertRaises(SaveSlotError):
+            delete_slot(self.saves_dir, self.game_dir, MAX_SAVE_SLOTS)
+
+    def test_deleting_one_slot_does_not_affect_others(self):
+        save_slot(self.saves_dir, self.game_dir, 0, {"turn_count": 1}, "Slot 0")
+        save_slot(self.saves_dir, self.game_dir, 1, {"turn_count": 2}, "Slot 1")
+        delete_slot(self.saves_dir, self.game_dir, 0)
+        slots = list_slots(self.saves_dir, self.game_dir)
+        self.assertFalse(slots[0]["used"])
+        self.assertTrue(slots[1]["used"])

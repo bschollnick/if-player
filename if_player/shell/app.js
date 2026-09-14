@@ -30,6 +30,7 @@
       "game-panel", "panel-tabs", "panel-sections", "panel-detail",
       "saves-modal", "saves-close", "saves-list",
       "settings-modal", "settings-close",
+      "game-prose-styles",
     ].forEach(function (id) {
       els[camelCase(id)] = document.getElementById(id);
     });
@@ -54,6 +55,16 @@
   // than being trusted raw.
   var ALLOWED_INLINE_TAGS = ["i", "b", "em", "strong", "br"];
 
+  // <style=name>...</style> is this project's own inline-tag convention
+  // (not part of the Ink language) for naming a prose voice -- font,
+  // size, colour -- defined as CSS in style.css and/or a game's own
+  // styles.css (see openGame()). The name is restricted to
+  // letters/digits/hyphen/underscore and turned into a fixed "style-"
+  // prefixed class, never into a raw attribute value, so a malformed or
+  // hostile name can never break out of the class attribute.
+  var STYLE_TAG_OPEN_RE = /&lt;style=([A-Za-z0-9_-]+)&gt;/gi;
+  var STYLE_TAG_CLOSE_RE = /&lt;\/style&gt;/gi;
+
   function storyHtml(text) {
     var div = document.createElement("div");
     div.textContent = text;
@@ -63,6 +74,10 @@
       var closeRe = new RegExp("&lt;/" + tag + "&gt;", "gi");
       escaped = escaped.replace(openRe, "<" + tag + ">").replace(closeRe, "</" + tag + ">");
     });
+    escaped = escaped.replace(STYLE_TAG_OPEN_RE, function (_, name) {
+      return '<span class="style-' + name + '">';
+    });
+    escaped = escaped.replace(STYLE_TAG_CLOSE_RE, "</span>");
     return escaped;
   }
 
@@ -109,6 +124,7 @@
       }
       state.playLayout = context.play_layout || "classic";
       state.readerPrefs = context.reader_prefs || state.readerPrefs;
+      els.gameProseStyles.textContent = context.prose_styles || "";
       applyBodyClasses();
       showPlayView();
       renderTurn(context);
@@ -332,6 +348,11 @@
       exportButton.textContent = "Export";
       exportButton.addEventListener("click", function () { exportSlot(slot.slot); });
       row.appendChild(exportButton);
+
+      var deleteButton = document.createElement("button");
+      deleteButton.textContent = "Delete";
+      deleteButton.addEventListener("click", function () { deleteSlotConfirmed(slot.slot); });
+      row.appendChild(deleteButton);
     }
 
     var importButton = document.createElement("button");
@@ -355,6 +376,14 @@
       if (context.error) { showSaveStatus(context.error); return; }
       renderTurn(context);
       closeSavesModal();
+    });
+  }
+
+  function deleteSlotConfirmed(slot) {
+    if (!window.confirm("Delete this save? This cannot be undone.")) return;
+    api().delete_save(slot).then(function (result) {
+      if (result.error) { showSaveStatus(result.error); return; }
+      refreshSavesList();
     });
   }
 

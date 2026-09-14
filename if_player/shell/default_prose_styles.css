@@ -1,0 +1,14 @@
+/* Default named prose styles for the standalone IF Player.
+
+A story tags a span of prose with <style=name>...</style> (this
+project's own inline-tag convention, layered on Ink's plain-text
+passthrough -- see app.js's storyHtml()). The names below are the
+baseline every game gets for free. A game folder's own optional
+styles.css (see ink_engine's find_prose_styles()) loads after this
+stylesheet, so a game may override any name here or add its own
+without ever touching this file. */
+
+.style-computer {
+  font-family: "Courier New", ui-monospace, monospace;
+  font-size: 0.9em;
+}

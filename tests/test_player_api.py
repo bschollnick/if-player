@@ -14,6 +14,7 @@ from if_player.player_api import PlayerAPI
 
 FIXTURES = Path(__file__).parent / "fixtures"
 SIMPLE_GAME = FIXTURES / "simple_game"
+STYLED_GAME = FIXTURES / "styled_game"
 
 
 class PlayerAPITestCase(TestCase):
@@ -21,6 +22,17 @@ class PlayerAPITestCase(TestCase):
         self.tmp = Path(tempfile.mkdtemp())
         self.addCleanup(shutil.rmtree, self.tmp, ignore_errors=True)
         self.api = PlayerAPI(settings_path=self.tmp / "settings.json")
+
+
+class ConstructorTests(TestCase):
+    def test_omitting_settings_path_resolves_the_real_default_location(self):
+        """The only production caller (main.py) constructs PlayerAPI()
+        with no arguments -- this must not crash, and every test above
+        deliberately never exercises this branch since they all pass an
+        explicit settings_path to avoid touching the real per-user
+        config directory."""
+        api = PlayerAPI()
+        self.assertTrue(str(api.settings_path).endswith("if_player/settings.json"))
 
 
 class OpenGameTests(PlayerAPITestCase):
@@ -41,6 +53,23 @@ class OpenGameTests(PlayerAPITestCase):
         self.api.set_reader_prefs("large", "wide")
         context = self.api.open_game(str(SIMPLE_GAME))
         self.assertEqual(context["reader_prefs"], {"font_size": "large", "text_width": "wide"})
+
+    def test_opening_a_game_with_no_styles_css_returns_none(self):
+        context = self.api.open_game(str(SIMPLE_GAME))
+        self.assertIsNone(context["prose_styles"])
+
+    def test_opening_a_game_with_its_own_styles_css_returns_its_text(self):
+        context = self.api.open_game(str(STYLED_GAME))
+        expected = (STYLED_GAME / "styles.css").read_text(encoding="utf-8")
+        self.assertEqual(context["prose_styles"], expected)
+
+    def test_styled_game_prose_carries_its_own_style_tags_verbatim(self):
+        """open_game() returns raw story text; the shell (app.js's
+        storyHtml()) is what turns <style=name> into a real span, not
+        PlayerAPI -- so the tags must survive here untouched."""
+        context = self.api.open_game(str(STYLED_GAME))
+        self.assertIn("<style=computer>", context["text"])
+        self.assertIn("<style=alice>", context["text"])
 
     def test_opening_a_missing_story_returns_an_error(self):
         empty_dir = self.tmp / "empty_game"

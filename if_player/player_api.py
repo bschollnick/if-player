@@ -2,12 +2,11 @@
 adapter over `game_session.py`'s pure play loop.
 
 Called from JS as `window.pywebview.api.<name>(...)`, returning a
-Promise resolving to the JSON-safe dict returned here. This is the ONLY
-module in `if_player` that imports `pywebview` (via a `file://` URI
-conversion, and the folder/save-file dialogs) and the ONLY one that
-touches `sys.path`/plugin discovery side effects and the local settings
-store -- `game_session.py` itself stays pure UI-framework-free, so it
-can be unit tested with no window and no filesystem-dialog surface.
+Promise resolving to the JSON-safe dict returned here. This module (and
+its `SaveSlotsAPI` mixin) is where `pywebview` is used -- for the
+`file://` URI conversion and the native folder/save-file dialogs --
+`game_session.py` itself stays pure UI-framework-free, so it can be unit
+tested with no window and no filesystem-dialog surface.
 """
 
 from __future__ import annotations
@@ -16,34 +15,18 @@ import json
 from pathlib import Path
 from typing import Any
 
+import webview
 from ink_engine.game_folder import (
     GameFolderError,
     read_play_layout,
     read_required_plugins,
 )
-from ink_engine.media_resolver import find_cover_image
+from ink_engine.media_resolver import find_cover_image, find_prose_styles
 
-from if_player import panel
-from if_player.game_session import (
-    GameSession,
-    build_saved_state,
-    choose,
-    open_game,
-    restart,
-    turn_context,
-    undo,
-)
+from if_player import game_session, panel, settings_store
+from if_player.game_session import GameSession
 from if_player.plugin_sources import discover_session_plugins
 from if_player.save_slots_api import SaveSlotsAPI
-from if_player.settings_store import (
-    default_settings_path,
-    get_reader_prefs,
-    is_folder_trusted,
-    load_settings,
-    mark_folder_trusted,
-    save_settings,
-    set_reader_prefs,
-)
 
 #: The default layout when a game's own manifest declares none / an
 #: unrecognised one.
@@ -81,7 +64,7 @@ class PlayerAPI(SaveSlotsAPI):
 
     def __init__(self, settings_path: Path | None = None) -> None:
         self.session: GameSession | None = None
-        self.settings_path = settings_path or default_settings_path()
+        self.settings_path = settings_path or settings_store.default_settings_path()
 
     def _save_file_path(self, game_dir: Path) -> Path:
         """Return the one save-file path for a game folder.
@@ -134,8 +117,8 @@ class PlayerAPI(SaveSlotsAPI):
             True only if this folder was previously trusted via
             `confirm_trust()`.
         """
-        settings = load_settings(self.settings_path)
-        return is_folder_trusted(settings, Path(game_dir))
+        settings = settings_store.load_settings(self.settings_path)
+        return settings_store.is_folder_trusted(settings, Path(game_dir))
 
     def confirm_trust(self, game_dir: str) -> dict[str, Any]:
         """Record `game_dir` as trusted, persisting the decision.
@@ -150,9 +133,9 @@ class PlayerAPI(SaveSlotsAPI):
         Returns:
             `{"trusted": True}`.
         """
-        settings = load_settings(self.settings_path)
-        settings = mark_folder_trusted(settings, Path(game_dir))
-        save_settings(self.settings_path, settings)
+        settings = settings_store.load_settings(self.settings_path)
+        settings = settings_store.mark_folder_trusted(settings, Path(game_dir))
+        settings_store.save_settings(self.settings_path, settings)
         return {"trusted": True}
 
     # -- Reader preferences ------------------------------------------------
@@ -164,8 +147,8 @@ class PlayerAPI(SaveSlotsAPI):
             `{"font_size", "text_width"}` (see `settings_store.
             get_reader_prefs()`).
         """
-        settings = load_settings(self.settings_path)
-        return get_reader_prefs(settings)
+        settings = settings_store.load_settings(self.settings_path)
+        return settings_store.get_reader_prefs(settings)
 
     def set_reader_prefs(self, font_size: str, text_width: str) -> dict[str, Any]:
         """Update and persist the reader's own font-size/text-width preferences.
@@ -181,10 +164,10 @@ class PlayerAPI(SaveSlotsAPI):
             values after applying whichever of the two arguments was
             valid.
         """
-        settings = load_settings(self.settings_path)
-        settings = set_reader_prefs(settings, font_size, text_width)
-        save_settings(self.settings_path, settings)
-        return {"prefs": get_reader_prefs(settings)}
+        settings = settings_store.load_settings(self.settings_path)
+        settings = settings_store.set_reader_prefs(settings, font_size, text_width)
+        settings_store.save_settings(self.settings_path, settings)
+        return {"prefs": settings_store.get_reader_prefs(settings)}
 
     # -- Turn loop -------------------------------------------------------
 
@@ -200,19 +183,28 @@ class PlayerAPI(SaveSlotsAPI):
             has never been confirmed trusted -- the JS layer should show
             the trust prompt and, once the user agrees, call
             `confirm_trust()` then re-call `open_game()`), `"play_layout"`,
-            and `"reader_prefs"` (`{"font_size", "text_width"}`, read once
-            here since the shell applies these as CSS classes and need
-            not refetch them on every turn). `{"error": <message>}` if
-            the folder has no real, resolvable compiled story.
+            `"prose_styles"` (the game's own `styles.css` text, or None if
+            it supplies none -- the shell injects this after its own
+            baseline stylesheet so a game may override or add named
+            `<style=name>` prose styles), and `"reader_prefs"`
+            (`{"font_size", "text_width"}`, read once here since the
+            shell applies these as CSS classes and need not refetch them
+            on every turn). `{"error": <message>}` if the folder has no
+            real, resolvable compiled story.
         """
         path = Path(game_dir)
-        settings = load_settings(self.settings_path)
-        trusted = is_folder_trusted(settings, path)
+        settings = settings_store.load_settings(self.settings_path)
+        trusted = settings_store.is_folder_trusted(settings, path)
         required_plugins = read_required_plugins(path)
-        reader_prefs = get_reader_prefs(settings)
+        reader_prefs = settings_store.get_reader_prefs(settings)
 
         if required_plugins and not trusted:
-            return {"needs_trust": True, "play_layout": read_play_layout(path) or DEFAULT_PLAY_LAYOUT, "reader_prefs": reader_prefs}
+            return {
+                "needs_trust": True,
+                "play_layout": read_play_layout(path) or DEFAULT_PLAY_LAYOUT,
+                "prose_styles": find_prose_styles(path),
+                "reader_prefs": reader_prefs,
+            }
 
         plugins = discover_session_plugins(path, trusted=trusted)
         saved_state = None
@@ -221,7 +213,7 @@ class PlayerAPI(SaveSlotsAPI):
             saved_state = json.loads(save_path.read_text(encoding="utf-8"))
 
         try:
-            self.session = open_game(path, saved_state, plugins, required_plugins, trusted)
+            self.session = game_session.open_game(path, saved_state, plugins, required_plugins, trusted)
         except GameFolderError as error:
             return {"error": str(error)}
 
@@ -229,6 +221,7 @@ class PlayerAPI(SaveSlotsAPI):
         context = self._session_context()
         context["needs_trust"] = False
         context["play_layout"] = read_play_layout(path) or DEFAULT_PLAY_LAYOUT
+        context["prose_styles"] = find_prose_styles(path)
         context["reader_prefs"] = reader_prefs
         return context
 
@@ -247,7 +240,7 @@ class PlayerAPI(SaveSlotsAPI):
         if self.session is None:
             return {"error": "No game is open"}
         try:
-            result = choose(self.session, choice_index, turn_count)
+            result = game_session.choose(self.session, choice_index, turn_count)
         except IndexError:
             return {"error": "Invalid choice"}
         if result.get("stale"):
@@ -264,7 +257,7 @@ class PlayerAPI(SaveSlotsAPI):
         """
         if self.session is None:
             return {"error": "No game is open"}
-        result = undo(self.session)
+        result = game_session.undo(self.session)
         if result is None:
             return {"error": "Nothing to undo"}
         self._write_save()
@@ -279,13 +272,7 @@ class PlayerAPI(SaveSlotsAPI):
         """
         if self.session is None:
             return {"error": "No game is open"}
-        settings = load_settings(self.settings_path)
-        trusted = is_folder_trusted(settings, self.session.game_dir)
-        required_plugins = read_required_plugins(self.session.game_dir)
-        plugins = discover_session_plugins(self.session.game_dir, trusted=trusted)
-        self.session = restart(self.session.game_dir, plugins, required_plugins, trusted)
-        self._write_save()
-        return self._add_media_and_panel(self._session_context())
+        return self._resume_from_state(None)
 
     # -- Panel -----------------------------------------------------------
 
@@ -347,9 +334,7 @@ class PlayerAPI(SaveSlotsAPI):
             return {"stale": True}
 
         text = panel.panel_command(self.session, self.session.state.globals, command_id, target_id)
-        self.session.previous_state = build_saved_state(
-            self.session.state, self.session.previous_state, self.session.transcript, self.session.engine_state
-        )
+        self.session.previous_state = self._snapshot_state()
         self._write_save()
 
         context = panel.panel_context(self.session, self.session.state.globals) or {}
@@ -364,8 +349,7 @@ class PlayerAPI(SaveSlotsAPI):
             return
         save_path = self._save_file_path(self.session.game_dir)
         save_path.parent.mkdir(parents=True, exist_ok=True)
-        saved = build_saved_state(self.session.state, self.session.previous_state, self.session.transcript, self.session.engine_state)
-        save_path.write_text(json.dumps(saved), encoding="utf-8")
+        save_path.write_text(json.dumps(self._snapshot_state()), encoding="utf-8")
 
     def _session_context(self) -> dict[str, Any]:
         """Build the current session's own turn context.
@@ -381,7 +365,7 @@ class PlayerAPI(SaveSlotsAPI):
         """
         if self.session is None:
             raise ValueError("_session_context() called with no open session")
-        return self._add_media_and_panel(turn_context(self.session))
+        return self._add_media_and_panel(game_session.turn_context(self.session))
 
     def _add_media_and_panel(self, context: dict[str, Any]) -> dict[str, Any]:
         """Convert `image_urls` to `file://` URIs and attach the panel.
@@ -423,7 +407,5 @@ class PlayerAPI(SaveSlotsAPI):
             The chosen folder's path, or None if the dialog was
             cancelled.
         """
-        import webview  # pylint: disable=import-outside-toplevel
-
         result = webview.windows[0].create_file_dialog(dialog_type=webview.FOLDER_DIALOG)
         return result[0] if result else None

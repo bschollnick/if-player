@@ -14,6 +14,7 @@ one reader, one set of preferences, applied to every game the same way.
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 from typing import Any
 
@@ -37,8 +38,6 @@ def default_settings_path() -> Path:
         Never created by this function -- see `load_settings()`/
         `save_settings()` for that.
     """
-    import os  # pylint: disable=import-outside-toplevel
-
     config_home = os.environ.get("XDG_CONFIG_HOME")
     base = Path(config_home) if config_home else Path.home() / ".config"
     return base / "if_player" / "settings.json"

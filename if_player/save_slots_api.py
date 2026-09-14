@@ -15,12 +15,14 @@ import json
 from pathlib import Path
 from typing import Any
 
+import webview
 from ink_engine.game_folder import read_required_plugins
 
 from if_player.game_session import GameSession, build_saved_state, open_game
 from if_player.plugin_sources import discover_session_plugins
 from if_player.save_slots import (
     SaveSlotError,
+    delete_slot,
     export_slot,
     import_slot,
     list_slots,
@@ -66,24 +68,43 @@ class SaveSlotsAPI:
         """Defined on `PlayerAPI`; declared here for type-checking only."""
         raise NotImplementedError
 
-    def _resume_from_state(self, saved_state: dict[str, Any]) -> dict[str, Any]:
-        """Rebuild the live session from an arbitrary saved-state dict.
+    def _snapshot_state(self) -> dict[str, Any]:
+        """Compose the live session's full persistable state dict.
 
-        Shared by `load_from_slot()`/`quickload()` -- both replace the
-        live session's state with a snapshot loaded from elsewhere on
-        disk, re-deriving plugins/trust fresh exactly like `open_game()`
-        does, never reusing the session's own stale `plugins`/`trusted`
-        (a slot saved before a folder was trusted, then loaded after,
-        must reflect the folder's CURRENT trust state, not the one it
-        had at save time -- trust is a property of the folder, never
+        Shared by every call site that needs the current session as a
+        `build_saved_state()`-shaped dict: auto-save, named-slot save,
+        quicksave, and the panel-command undo snapshot.
+
+        Returns:
+            The current session's state, ready to write to a save file
+            or slot.
+
+        Raises:
+            ValueError: No game is currently open.
+        """
+        if self.session is None:
+            raise ValueError("_snapshot_state() called with no open session")
+        return build_saved_state(self.session.state, self.session.previous_state, self.session.transcript, self.session.engine_state)
+
+    def _resume_from_state(self, saved_state: dict[str, Any] | None) -> dict[str, Any]:
+        """Rebuild the live session, re-deriving trust/plugins fresh.
+
+        Shared by `load_from_slot()`/`quickload()`/`PlayerAPI.restart()`
+        -- all three replace the live session with a rebuilt one,
+        re-deriving plugins/trust fresh exactly like `open_game()` does,
+        never reusing the session's own stale `plugins`/`trusted` (a
+        slot saved before a folder was trusted, then loaded after, must
+        reflect the folder's CURRENT trust state, not the one it had at
+        save time -- trust is a property of the folder, never
         serialized into a slot).
 
         Args:
-            saved_state: A previously-saved state dict (`build_saved_state()`'s
-                own shape).
+            saved_state: A previously-saved state dict
+                (`build_saved_state()`'s own shape) to resume from, or
+                None to start a brand-new game (`restart()`'s own case).
 
         Returns:
-            A turn context dict for the resumed turn.
+            A turn context dict for the resumed (or fresh) turn.
 
         Raises:
             ValueError: No game is currently open.
@@ -125,9 +146,8 @@ class SaveSlotsAPI:
         """
         if self.session is None:
             return {"error": "No game is open"}
-        state = build_saved_state(self.session.state, self.session.previous_state, self.session.transcript, self.session.engine_state)
         try:
-            save_slot(self._saves_dir(), self.session.game_dir, slot, state, label)
+            save_slot(self._saves_dir(), self.session.game_dir, slot, self._snapshot_state(), label)
         except SaveSlotError as error:
             return {"error": str(error)}
         return {"saved": True}
@@ -153,6 +173,26 @@ class SaveSlotsAPI:
         except SaveSlotError as error:
             return {"error": str(error)}
         return self._resume_from_state(saved_state)
+
+    def delete_save(self, slot: int) -> dict[str, Any]:
+        """Delete one named save slot, if it exists.
+
+        A no-op, not an error, if the slot was already empty.
+
+        Args:
+            slot: The slot index to delete.
+
+        Returns:
+            `{"deleted": True}`, or `{"error": ...}` if no game is open
+            or `slot` is out of range.
+        """
+        if self.session is None:
+            return {"error": "No game is open"}
+        try:
+            delete_slot(self._saves_dir(), self.session.game_dir, slot)
+        except SaveSlotError as error:
+            return {"error": str(error)}
+        return {"deleted": True}
 
     def export_save(self, slot: int, destination: str) -> dict[str, Any]:
         """Export one named save slot to a chosen file on disk.
@@ -212,8 +252,6 @@ class SaveSlotsAPI:
         Returns:
             The chosen path, or None if the dialog was cancelled.
         """
-        import webview  # pylint: disable=import-outside-toplevel
-
         result = webview.windows[0].create_file_dialog(dialog_type=webview.SAVE_DIALOG, save_filename=suggested_filename)
         return result[0] if result else None
 
@@ -223,8 +261,6 @@ class SaveSlotsAPI:
         Returns:
             The chosen path, or None if the dialog was cancelled.
         """
-        import webview  # pylint: disable=import-outside-toplevel
-
         result = webview.windows[0].create_file_dialog(dialog_type=webview.OPEN_DIALOG, file_types=("Save files (*.json)", "All files (*.*)"))
         return result[0] if result else None
 
@@ -246,10 +282,9 @@ class SaveSlotsAPI:
         """
         if self.session is None:
             return {"error": "No game is open"}
-        state = build_saved_state(self.session.state, self.session.previous_state, self.session.transcript, self.session.engine_state)
         path = self._quicksave_path(self.session.game_dir)
         path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(json.dumps({"label": QUICKSAVE_LABEL, "state": state}), encoding="utf-8")
+        path.write_text(json.dumps({"label": QUICKSAVE_LABEL, "state": self._snapshot_state()}), encoding="utf-8")
         return {"saved": True}
 
     def quickload(self) -> dict[str, Any]:

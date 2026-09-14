@@ -1,0 +1,14 @@
+/* styled_game's own prose styles -- loads after the player's shell
+   defaults, so it may override any baseline name or add its own. */
+
+.style-computer {
+  font-family: "Courier New", ui-monospace, monospace;
+  font-size: 0.9em;
+  color: #33ff66;
+}
+
+.style-alice {
+  font-family: Helvetica, Arial, sans-serif;
+  font-size: 1.1em;
+  color: #2a5adf;
+}

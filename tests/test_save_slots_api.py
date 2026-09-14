@@ -70,6 +70,35 @@ class SaveLoadSlotTests(SaveSlotsAPITestCase):
         self.assertIn("error", fresh_api.load_from_slot(0))
 
 
+class DeleteSaveTests(SaveSlotsAPITestCase):
+    def test_deleting_a_used_slot_empties_it(self):
+        self.api.save_to_slot(1, "To be deleted")
+        result = self.api.delete_save(1)
+        self.assertEqual(result, {"deleted": True})
+        slots = self.api.list_saves()["slots"]
+        self.assertFalse(slots[1]["used"])
+
+    def test_deleting_an_already_empty_slot_still_reports_deleted(self):
+        result = self.api.delete_save(2)
+        self.assertEqual(result, {"deleted": True})
+
+    def test_deleting_an_out_of_range_slot_returns_an_error(self):
+        result = self.api.delete_save(99)
+        self.assertIn("error", result)
+
+    def test_deleting_one_slot_does_not_affect_others(self):
+        self.api.save_to_slot(0, "Slot 0")
+        self.api.save_to_slot(1, "Slot 1")
+        self.api.delete_save(0)
+        slots = self.api.list_saves()["slots"]
+        self.assertFalse(slots[0]["used"])
+        self.assertTrue(slots[1]["used"])
+
+    def test_calling_delete_save_before_any_game_is_open_returns_an_error(self):
+        fresh_api = PlayerAPI(settings_path=self.tmp / "settings2.json")
+        self.assertIn("error", fresh_api.delete_save(0))
+
+
 class ExportImportSaveTests(SaveSlotsAPITestCase):
     def test_exporting_then_importing_round_trips_via_a_real_file(self):
         self.api.choose(0, self.api.session.state.turn_count)
