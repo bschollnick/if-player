@@ -16,6 +16,7 @@ from pathlib import Path
 from typing import Any
 
 import webview
+from ink_engine.engine import UnboundExternalError
 from ink_engine.game_folder import read_required_plugins
 
 from if_player.game_session import GameSession, build_saved_state, open_game
@@ -29,7 +30,11 @@ from if_player.save_slots import (
     load_slot,
     save_slot,
 )
-from if_player.settings_store import is_folder_trusted, load_settings
+from if_player.settings_store import (
+    is_folder_trusted,
+    is_strict_externals,
+    load_settings,
+)
 
 #: The label written for a quicksave -- a quicksave is a single
 #: dedicated slot outside the five numbered `save_slots.py` slots.
@@ -104,7 +109,9 @@ class SaveSlotsAPI:
                 None to start a brand-new game (`restart()`'s own case).
 
         Returns:
-            A turn context dict for the resumed (or fresh) turn.
+            A turn context dict for the resumed (or fresh) turn, or
+            `{"error": ...}` when the rebuilt session cannot run the story
+            (see `player_api.py`'s own js_api no-raise contract).
 
         Raises:
             ValueError: No game is currently open.
@@ -115,8 +122,22 @@ class SaveSlotsAPI:
         settings = load_settings(self.settings_path)
         trusted = is_folder_trusted(settings, game_dir)
         required_plugins = read_required_plugins(game_dir)
-        plugins = discover_session_plugins(game_dir, trusted=trusted)
-        self.session = open_game(game_dir, saved_state, plugins, required_plugins, trusted)
+        # The open session's mount is reused: it is the same game, and
+        # re-mounting would purge modules this session still holds.
+        mount = self.session.mount
+        plugins = discover_session_plugins(trusted=trusted, mount=mount)
+        try:
+            self.session = open_game(
+                game_dir,
+                saved_state,
+                plugins,
+                required_plugins,
+                trusted,
+                strict_externals=is_strict_externals(settings),
+                mount=mount,
+            )
+        except UnboundExternalError as error:
+            return {"error": f"Unbound EXTERNAL: {error}"}
         self._write_save()
         return self._add_media_and_panel(self._session_context())
 

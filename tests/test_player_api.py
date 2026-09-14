@@ -6,15 +6,20 @@ at all)."""
 from __future__ import annotations
 
 import shutil
+import sys
 import tempfile
 from pathlib import Path
 from unittest import TestCase
+from unittest.mock import patch
 
-from if_player.player_api import PlayerAPI
+from ink_engine.engine import UnboundExternalError
+
+from if_player.player_api import PlayerAPI, _to_file_uri
 
 FIXTURES = Path(__file__).parent / "fixtures"
 SIMPLE_GAME = FIXTURES / "simple_game"
 STYLED_GAME = FIXTURES / "styled_game"
+CHOICE_IMAGE_GAME = FIXTURES / "choice_image_game"
 
 
 class PlayerAPITestCase(TestCase):
@@ -22,6 +27,167 @@ class PlayerAPITestCase(TestCase):
         self.tmp = Path(tempfile.mkdtemp())
         self.addCleanup(shutil.rmtree, self.tmp, ignore_errors=True)
         self.api = PlayerAPI(settings_path=self.tmp / "settings.json")
+
+
+class GameMountTests(PlayerAPITestCase):
+    """Opening a second game must not leave it running the first's code."""
+
+    def _trusted_game(self, tag: str) -> Path:
+        game = self.tmp / tag / "mygame"
+        shutil.copytree(SIMPLE_GAME, game)
+        (game / "__init__.py").write_text("", encoding="utf-8")
+        (game / "plugins.py").write_text(
+            f"from ink_engine.plugin import Plugin\nPLUGIN = Plugin(name='p_{tag}', display_name='{tag}')\n",
+            encoding="utf-8",
+        )
+        self.api.confirm_trust(str(game))
+        return game
+
+    def _own_plugins(self) -> list[str]:
+        return sorted(name for name in self.api.session.plugins if name.startswith("p_"))
+
+    def test_a_second_game_gets_its_own_plugins(self):
+        self.api.open_game(str(self._trusted_game("A")))
+        self.assertEqual(self._own_plugins(), ["p_A"])
+        self.api.open_game(str(self._trusted_game("B")))
+        self.assertEqual(self._own_plugins(), ["p_B"])
+
+    def test_the_session_holds_its_mount(self):
+        self.api.open_game(str(self._trusted_game("A")))
+        self.assertIsNotNone(self.api.session.mount)
+
+    def test_opening_games_does_not_accumulate_path_entries(self):
+        self.api.open_game(str(self._trusted_game("A")))
+        after_first = len(sys.path)
+        self.api.open_game(str(self._trusted_game("B")))
+        self.assertEqual(len(sys.path), after_first)
+
+    def test_an_untrusted_game_is_never_mounted(self):
+        game = self.tmp / "untrusted" / "mygame"
+        shutil.copytree(SIMPLE_GAME, game)
+        (game / "__init__.py").write_text("", encoding="utf-8")
+        self.api.open_game(str(game))
+        self.assertIsNone(self.api.session.mount)
+
+
+class ManifestSupportAPITests(PlayerAPITestCase):
+    """A game this engine cannot play is refused with a message the
+    player can act on, not an exception across the js_api boundary."""
+
+    def _game_declaring(self, manifest: str) -> Path:
+        game = self.tmp / "game"
+        shutil.rmtree(game, ignore_errors=True)
+        shutil.copytree(SIMPLE_GAME, game)
+        (game / "manifest.yaml").write_text(manifest, encoding="utf-8")
+        return game
+
+    def test_a_future_manifest_version_is_refused(self):
+        game = self._game_declaring("MANIFEST_VERSION: 99\nMAIN_STORY_FILE: story.inkj\n")
+        result = self.api.open_game(str(game))
+        self.assertIn("newer player", result.get("error", ""))
+
+    def test_another_story_format_is_refused(self):
+        game = self._game_declaring("ENGINE_FORMAT: twine\nMAIN_STORY_FILE: story.inkj\n")
+        result = self.api.open_game(str(game))
+        self.assertIn("twine", result.get("error", ""))
+
+    def test_a_refused_game_does_not_become_the_open_session(self):
+        """Refusing must leave no half-opened game behind."""
+        self.api.open_game(str(self._game_declaring("ENGINE_FORMAT: twine\nMAIN_STORY_FILE: story.inkj\n")))
+        self.assertIsNone(self.api.session)
+
+    def test_a_supported_game_still_opens(self):
+        game = self._game_declaring("MANIFEST_VERSION: 1\nENGINE_FORMAT: ink\nMAIN_STORY_FILE: story.inkj\n")
+        self.assertNotIn("error", self.api.open_game(str(game)))
+
+
+class JsApiNeverRaisesTests(PlayerAPITestCase):
+    """Every js_api method returns a dict rather than raising.
+
+    pywebview serializes a method's RETURN VALUE and resolves the JS
+    promise with it; an exception rejects the promise instead
+    (`webview/js/api.js` `_checkValue`). The shell's call sites are all
+    `.then(...)` with no `.catch(...)`, so a rejection runs no handler at
+    all -- the window simply stops responding, with no error shown.
+    """
+
+    def _raising(self):
+        """Patch the engine calls a rebuilt session goes through."""
+        return (
+            patch("if_player.game_session.start_new_story", side_effect=UnboundExternalError("boom")),
+            patch("if_player.game_session.load_game_state", side_effect=UnboundExternalError("boom")),
+        )
+
+    def test_open_game_reports_an_unbound_external(self):
+        with patch("if_player.game_session.start_new_story", side_effect=UnboundExternalError("boom")):
+            result = self.api.open_game(str(SIMPLE_GAME))
+        self.assertIn("error", result)
+
+    def test_restart_reports_an_unbound_external(self):
+        self.api.open_game(str(SIMPLE_GAME))
+        first, second = self._raising()
+        with first, second:
+            result = self.api.restart()
+        self.assertIn("error", result)
+
+    def test_quickload_reports_an_unbound_external(self):
+        self.api.open_game(str(SIMPLE_GAME))
+        self.api.quicksave()
+        first, second = self._raising()
+        with first, second:
+            result = self.api.quickload()
+        self.assertIn("error", result)
+
+    def test_load_from_slot_reports_an_unbound_external(self):
+        self.api.open_game(str(SIMPLE_GAME))
+        self.api.save_to_slot(0, "label")
+        first, second = self._raising()
+        with first, second:
+            result = self.api.load_from_slot(0)
+        self.assertIn("error", result)
+
+    def test_choose_reports_an_unbound_external(self):
+        self.api.open_game(str(SIMPLE_GAME))
+        with patch("if_player.game_session.choose", side_effect=UnboundExternalError("boom")):
+            result = self.api.choose(0, self.api.session.state.turn_count)
+        self.assertIn("error", result)
+
+
+class StrictExternalsAPITests(PlayerAPITestCase):
+    """The js_api surface for strict-externals mode."""
+
+    def test_it_is_off_by_default(self):
+        self.assertFalse(self.api.get_strict_externals())
+
+    def test_enabling_it_persists_and_reads_back(self):
+        self.assertEqual(self.api.set_strict_externals(True), {"strict_externals": True})
+        self.assertTrue(self.api.get_strict_externals())
+
+    def test_a_session_opened_afterwards_runs_strict(self):
+        self.api.set_strict_externals(True)
+        self.api.open_game(str(SIMPLE_GAME))
+        self.assertTrue(self.api.session.state.strict_externals)
+
+    def test_restart_keeps_strict_mode(self):
+        """`_resume_from_state()` re-derives trust and plugins fresh; it
+        must re-derive strictness too, or restart silently drops it."""
+        self.api.set_strict_externals(True)
+        self.api.open_game(str(SIMPLE_GAME))
+        self.api.restart()
+        self.assertTrue(self.api.session.state.strict_externals)
+
+    def test_quickload_keeps_strict_mode(self):
+        self.api.set_strict_externals(True)
+        self.api.open_game(str(SIMPLE_GAME))
+        self.api.quicksave()
+        self.api.quickload()
+        self.assertTrue(self.api.session.state.strict_externals)
+
+    def test_a_live_session_keeps_the_mode_it_was_opened_with(self):
+        """Toggling mid-play must not change how the open game behaves."""
+        self.api.open_game(str(SIMPLE_GAME))
+        self.api.set_strict_externals(True)
+        self.assertFalse(self.api.session.state.strict_externals)
 
 
 class ConstructorTests(TestCase):
@@ -94,6 +260,33 @@ class OpenGameTests(PlayerAPITestCase):
         context = self.api.open_game(str(SIMPLE_GAME))
         for path in context["image_urls"]:
             self.assertTrue(path.startswith("file://"))
+
+    def test_a_data_uri_is_left_alone(self):
+        """A bundle resolves media to `data:` URIs, which carry the bytes
+        already and are not paths; treating one as a path raised."""
+        data_uri = "data:image/jpeg;base64,/9j/4AAQ"
+        self.assertEqual(_to_file_uri(data_uri), data_uri)
+
+    def test_an_absolute_path_still_becomes_a_file_uri(self):
+        self.assertEqual(_to_file_uri("/games/art/x.jpg"), "file:///games/art/x.jpg")
+
+    def test_a_choice_carries_its_own_image(self):
+        """Standard Ink choice tags (`* [Text # image: x.jpg]`): the
+        original picks a character's model by appearance this way."""
+        context = self.api.open_game(str(CHOICE_IMAGE_GAME))
+        first = context["choices"][0]
+        self.assertEqual(first["text"], "As a cleaner")
+        self.assertEqual(len(first["image_urls"]), 1)
+        self.assertTrue(first["image_urls"][0].startswith("file://"))
+
+    def test_an_untagged_choice_has_no_images(self):
+        context = self.api.open_game(str(CHOICE_IMAGE_GAME))
+        self.assertEqual(context["choices"][-1]["image_urls"], [])
+
+    def test_a_choice_tag_is_kept_out_of_the_choice_text(self):
+        context = self.api.open_game(str(CHOICE_IMAGE_GAME))
+        for choice in context["choices"]:
+            self.assertNotIn("image:", choice["text"])
 
     def test_a_game_with_no_panel_gets_a_none_panel(self):
         context = self.api.open_game(str(SIMPLE_GAME))

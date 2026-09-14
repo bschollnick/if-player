@@ -22,7 +22,7 @@ GAME_WITH_SIDEBAR = FIXTURES / "game_with_sidebar"
 class PanelDispatchTests(TestCase):
     def setUp(self):
         # Real importlib dispatch needs the fixture's own parent on
-        # sys.path, exactly like plugin_sources.ensure_importable() does
+        # sys.path, exactly like discovery.make_game_folder_importable() does
         # for a trusted game folder.
         self.addCleanup(lambda: sys.path.remove(str(FIXTURES)) if str(FIXTURES) in sys.path else None)
         if str(FIXTURES) not in sys.path:

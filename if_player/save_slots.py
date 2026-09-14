@@ -16,6 +16,8 @@ import json
 from pathlib import Path
 from typing import Any
 
+from ink_engine.game_source import game_identity
+
 #: How many save slots each game folder gets.
 MAX_SAVE_SLOTS = 5
 
@@ -45,7 +47,7 @@ def _slot_path(saves_dir: Path, game_dir: Path, slot: int) -> Path:
     """
     if not 0 <= slot < MAX_SAVE_SLOTS:
         raise SaveSlotError(f"Slot {slot} is out of range (0-{MAX_SAVE_SLOTS - 1})")
-    return saves_dir / game_dir.resolve().name / f"slot{slot}.json"
+    return saves_dir / game_identity(game_dir) / f"slot{slot}.json"
 
 
 def list_slots(saves_dir: Path, game_dir: Path) -> list[dict[str, Any]]:
@@ -153,7 +155,7 @@ def export_slot(saves_dir: Path, game_dir: Path, slot: int) -> dict[str, Any]:
     envelope = json.loads(path.read_text(encoding="utf-8"))
     return {
         "quickbbs_if_save_version": SAVE_ENVELOPE_VERSION,
-        "game_name": game_dir.resolve().name,
+        "game_name": game_identity(game_dir),
         "label": envelope.get("label", ""),
         "state": envelope["state"],
     }
@@ -176,7 +178,7 @@ def import_slot(saves_dir: Path, game_dir: Path, slot: int, envelope: dict[str, 
     """
     if not isinstance(envelope, dict) or envelope.get("quickbbs_if_save_version") != SAVE_ENVELOPE_VERSION:
         raise SaveSlotError("Not a recognized save file")
-    if envelope.get("game_name") != game_dir.resolve().name:
+    if envelope.get("game_name") != game_identity(game_dir):
         raise SaveSlotError("This save file is from a different game")
     if not isinstance(envelope.get("state"), dict):
         raise SaveSlotError("Not a recognized save file")

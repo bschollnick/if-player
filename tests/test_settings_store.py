@@ -10,10 +10,12 @@ from unittest import TestCase
 from if_player.settings_store import (
     get_reader_prefs,
     is_folder_trusted,
+    is_strict_externals,
     load_settings,
     mark_folder_trusted,
     save_settings,
     set_reader_prefs,
+    set_strict_externals,
 )
 
 
@@ -65,6 +67,29 @@ class SettingsStoreTests(TestCase):
         nested_path = self.tmp / "nested" / "dir" / "settings.json"
         save_settings(nested_path, {})
         self.assertTrue(nested_path.is_file())
+
+
+class StrictExternalsSettingTests(TestCase):
+    """Off unless explicitly enabled -- a player meeting a game with one
+    unwired binding should still be able to play it."""
+
+    def test_it_is_off_when_nothing_is_saved(self):
+        self.assertFalse(is_strict_externals({}))
+
+    def test_enabling_then_reading_it_back(self):
+        self.assertTrue(is_strict_externals(set_strict_externals({}, True)))
+
+    def test_disabling_it_again(self):
+        self.assertFalse(is_strict_externals(set_strict_externals(set_strict_externals({}, True), False)))
+
+    def test_a_non_boolean_stored_value_reads_as_off(self):
+        """A corrupted settings file must not silently turn strictness on."""
+        self.assertFalse(is_strict_externals({"strict_externals": "yes"}))
+
+    def test_setting_it_does_not_mutate_the_input(self):
+        settings = {}
+        set_strict_externals(settings, True)
+        self.assertEqual(settings, {})
 
 
 class ReaderPrefsTests(TestCase):

@@ -111,6 +111,37 @@ def mark_folder_trusted(settings: dict[str, Any], game_dir: Path) -> dict[str, A
     return {**settings, "trusted_folders": trusted_folders}
 
 
+def is_strict_externals(settings: dict[str, Any]) -> bool:
+    """Return whether unbound EXTERNALs should raise rather than fall
+    through to a story's own Ink stub.
+
+    Off unless explicitly enabled: a player meeting a game with one
+    unwired binding should still be able to play it. It is worth turning
+    on while developing a game, where an EXTERNAL answering from its stub
+    is a bug that otherwise surfaces only as odd behaviour much later.
+
+    Args:
+        settings: The loaded settings dict.
+
+    Returns:
+        True only if `strict_externals` is stored as exactly True.
+    """
+    return settings.get("strict_externals") is True
+
+
+def set_strict_externals(settings: dict[str, Any], enabled: bool) -> dict[str, Any]:
+    """Return a new settings dict with strict-externals mode set.
+
+    Args:
+        settings: The loaded settings dict (not mutated).
+        enabled: Whether to raise on an unbound EXTERNAL.
+
+    Returns:
+        A new dict carrying the setting.
+    """
+    return {**settings, "strict_externals": bool(enabled)}
+
+
 def get_reader_prefs(settings: dict[str, Any]) -> dict[str, str]:
     """Return the reader's own font-size/text-width preferences.
 

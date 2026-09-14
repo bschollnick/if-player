@@ -177,6 +177,92 @@ class BindingsForTests(TestCase):
         self.assertEqual(result, {})
 
 
+class InitialGlobalsTests(TestCase):
+    """A fresh game may be seeded with Ink VAR values before its opening
+    turn -- the character-creation seam. `simple_game` declares no VARs of
+    its own, so these check the plumbing reaches `state.globals`; the
+    seeding SEMANTICS (a seeded value driving the story's own arithmetic
+    and branches) are covered against a real VAR story in ink_engine's own
+    `test_engine_start_new_story.py`."""
+
+    def test_a_seeded_global_reaches_the_running_state(self):
+        session = open_game(
+            SIMPLE_GAME,
+            saved_state=None,
+            plugins={},
+            active_plugin_names=[],
+            trusted=False,
+            initial_globals={"player_name": "Ada"},
+        )
+        self.assertEqual(session.state.globals["player_name"], "Ada")
+
+    def test_seeding_is_optional(self):
+        session = open_game(SIMPLE_GAME, saved_state=None, plugins={}, active_plugin_names=[], trusted=False)
+        self.assertEqual(session.state.globals, {})
+
+    def test_restart_can_reseed(self):
+        session = restart(SIMPLE_GAME, {}, [], False, initial_globals={"player_name": "Grace"})
+        self.assertEqual(session.state.globals["player_name"], "Grace")
+
+    def test_a_resumed_save_ignores_seeding(self):
+        """A resumed game already carries its own globals -- re-seeding it
+        would silently overwrite real progress."""
+        original = open_game(
+            SIMPLE_GAME,
+            saved_state=None,
+            plugins={},
+            active_plugin_names=[],
+            trusted=False,
+            initial_globals={"player_name": "Ada"},
+        )
+        saved = build_saved_state(original.state, original.previous_state, original.transcript, original.engine_state)
+        resumed = open_game(
+            SIMPLE_GAME,
+            saved_state=saved,
+            plugins={},
+            active_plugin_names=[],
+            trusted=False,
+            initial_globals={"player_name": "Overwritten"},
+        )
+        self.assertEqual(resumed.state.globals["player_name"], "Ada")
+
+
+class StrictExternalsTests(TestCase):
+    """Strict mode is a live host setting: it is threaded onto the session
+    so every later rebuild (undo, a panel hook) keeps the mode the game was
+    opened with, and never travels in a save file."""
+
+    def test_a_session_is_lenient_by_default(self):
+        session = open_game(SIMPLE_GAME, saved_state=None, plugins={}, active_plugin_names=[], trusted=False)
+        self.assertFalse(session.strict_externals)
+        self.assertFalse(session.state.strict_externals)
+
+    def test_strict_mode_reaches_the_running_state(self):
+        session = open_game(SIMPLE_GAME, saved_state=None, plugins={}, active_plugin_names=[], trusted=False, strict_externals=True)
+        self.assertTrue(session.state.strict_externals)
+
+    def test_a_resumed_session_is_as_strict_as_it_is_told(self):
+        original = open_game(SIMPLE_GAME, saved_state=None, plugins={}, active_plugin_names=[], trusted=False)
+        saved = build_saved_state(original.state, original.previous_state, original.transcript, original.engine_state)
+        resumed = open_game(SIMPLE_GAME, saved_state=saved, plugins={}, active_plugin_names=[], trusted=False, strict_externals=True)
+        self.assertTrue(resumed.state.strict_externals)
+
+    def test_strictness_is_not_written_into_a_save(self):
+        session = open_game(SIMPLE_GAME, saved_state=None, plugins={}, active_plugin_names=[], trusted=False, strict_externals=True)
+        saved = build_saved_state(session.state, session.previous_state, session.transcript, session.engine_state)
+        self.assertNotIn("strict_externals", saved)
+
+    def test_undo_rebuilds_the_state_with_the_same_strictness(self):
+        session = open_game(SIMPLE_GAME, saved_state=None, plugins={}, active_plugin_names=[], trusted=False, strict_externals=True)
+        choose(session, 0, session.state.turn_count)
+        undo(session)
+        self.assertTrue(session.state.strict_externals)
+
+    def test_restart_keeps_the_mode(self):
+        session = restart(SIMPLE_GAME, {}, [], False, strict_externals=True)
+        self.assertTrue(session.state.strict_externals)
+
+
 class BuildSavedStateTests(TestCase):
     def test_the_saved_dict_carries_all_three_bookkeeping_keys(self):
         session = open_game(SIMPLE_GAME, saved_state=None, plugins={}, active_plugin_names=[], trusted=False)
@@ -210,3 +296,80 @@ class AppendTranscriptEntryTests(TestCase):
         original: list[dict[str, object]] = []
         append_transcript_entry(original, "text", None)
         self.assertEqual(original, [])
+
+
+class ActivePluginNamesSurviveRebindingTests(TestCase):
+    """A session rebinds from the names it activated, never from its
+    state keys.
+
+    Reproduces the real shape that made this matter: a game's own plugin
+    shares a generic plugin's `state_key` on purpose, so both operate on
+    one store. Deriving active names from `engine_state.keys()` then
+    yields the GENERIC plugin's name and rebinds it in place of the
+    game's own -- silently, because both answer the same Ink function
+    names. In the real game that swap covers over a thousand call sites.
+    """
+
+    GENERIC_NAME = "character_occupancy"
+    GAME_NAME = "game_occupancy"
+    SHARED_SLOT = "character_occupancy"
+
+    def _plugins(self) -> dict[str, Plugin]:
+        generic = Plugin(
+            name=self.GENERIC_NAME,
+            display_name="Generic occupancy",
+            state_key=self.SHARED_SLOT,
+            init_state=lambda config: {},
+            bind=lambda own_state, engine_state, list_defs: {"where_is_now": lambda: "generic"},
+        )
+        # Same slot, different plugin name -- exactly ASFA's arrangement.
+        game = Plugin(
+            name=self.GAME_NAME,
+            display_name="Game occupancy",
+            state_key=self.SHARED_SLOT,
+            init_state=lambda config: {},
+            bind=lambda own_state, engine_state, list_defs: {"where_is_now": lambda: "game"},
+        )
+        return {self.GENERIC_NAME: generic, self.GAME_NAME: game}
+
+    def _open(self):
+        return open_game(
+            SIMPLE_GAME,
+            saved_state=None,
+            plugins=self._plugins(),
+            active_plugin_names=[self.GAME_NAME],
+            trusted=True,
+        )
+
+    def test_the_session_remembers_the_names_it_activated(self):
+        session = self._open()
+        self.assertEqual(session.active_plugin_names, [self.GAME_NAME])
+
+    def test_the_state_key_does_not_match_the_plugin_name(self):
+        """Guards the premise: if these ever coincided the tests below
+        would pass for the wrong reason."""
+        session = self._open()
+        self.assertIn(self.SHARED_SLOT, session.engine_state)
+        self.assertNotIn(self.GAME_NAME, session.engine_state)
+
+    def test_undo_rebinds_the_games_plugin_not_the_generic_one(self):
+        session = self._open()
+        choose(session, 0, session.state.turn_count)
+        undo(session)
+        self.assertEqual(session.state.engine_bindings["where_is_now"](), "game")
+
+    def test_a_bindings_only_plugin_survives_undo(self):
+        """A plugin with no `state_key` leaves no trace in
+        `engine_state`, so a state-key-derived list drops it entirely."""
+        plugins = self._plugins()
+        plugins["extras"] = Plugin(name="extras", display_name="Extras", bindings={"extra_now": lambda: 1})
+        session = open_game(
+            SIMPLE_GAME,
+            saved_state=None,
+            plugins=plugins,
+            active_plugin_names=[self.GAME_NAME, "extras"],
+            trusted=True,
+        )
+        choose(session, 0, session.state.turn_count)
+        undo(session)
+        self.assertIn("extra_now", session.state.engine_bindings)

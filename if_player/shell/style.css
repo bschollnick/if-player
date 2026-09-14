@@ -3,6 +3,14 @@
    #centre-header/#centre-footer entirely (single story column); "three_column"
    shows them. Toggled by app.js's applyLayout() via a body class. */
 
+/* app.js shows and hides every view and modal through the `hidden`
+   property. Its default `display: none` loses to any display rule on the
+   element itself, and the modals below each set one, so without this they
+   are visible from load and nothing can dismiss them. */
+[hidden] {
+  display: none !important;
+}
+
 :root {
   color-scheme: light dark;
   --bg: #ffffff;
@@ -109,10 +117,15 @@ code {
 
 /* -- Play view: three-region layout ------------------------------------ */
 
+/* Exactly the viewport's height, never more: the columns below scroll
+   their own overflow, so the page itself never does. A min-height here
+   instead would let the grid grow with the story and carry the sidebar
+   controls up off the top of the screen. */
 #play-view {
   display: grid;
   grid-template-columns: 12em minmax(0, 1fr);
-  min-height: 100vh;
+  height: 100vh;
+  overflow: hidden;
 }
 
 body.layout-three_column #play-view {
@@ -125,13 +138,16 @@ body.layout-three_column #play-view {
   gap: 0.5em;
   padding: 1em;
   border-right: 1px solid var(--border);
+  overflow-y: auto;
 }
 
 #sidebar button { text-align: left; }
 
+/* The one column that scrolls with the story. */
 #story-column {
   padding: 1.5em 2em 4em;
   max-width: 46em;
+  overflow-y: auto;
 }
 
 body.layout-three_column #story-column { max-width: none; }
@@ -231,6 +247,23 @@ body.layout-three_column #story-column { max-width: none; }
   text-align: left;
 }
 
+.choice-label { flex: 1; }
+
+/* A choice offering a picture (a character's model, say) is chosen by
+   looking at it, so the image leads and the label captions it. */
+.choice-button.has-image {
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: 0.5em;
+}
+
+.choice-image {
+  max-height: 14em;
+  max-width: 100%;
+  border-radius: 4px;
+  object-fit: contain;
+}
+
 .choice-key {
   background: var(--panel-bg);
   border-radius: 4px;
@@ -246,6 +279,7 @@ body.layout-three_column #story-column { max-width: none; }
   border-left: 1px solid var(--border);
   padding: 1em;
   background: var(--panel-bg);
+  overflow-y: auto;
 }
 
 .panel-tabs {

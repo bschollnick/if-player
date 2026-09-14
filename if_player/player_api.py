@@ -12,15 +12,19 @@ tested with no window and no filesystem-dialog surface.
 from __future__ import annotations
 
 import json
+import re
 from pathlib import Path
 from typing import Any
 
 import webview
+from ink_engine.discovery import mount_game
+from ink_engine.engine import UnboundExternalError
 from ink_engine.game_folder import (
     GameFolderError,
     read_play_layout,
     read_required_plugins,
 )
+from ink_engine.game_source import GameSourceError, game_identity, open_game_source
 from ink_engine.media_resolver import find_cover_image, find_prose_styles
 
 from if_player import game_session, panel, settings_store
@@ -32,18 +36,29 @@ from if_player.save_slots_api import SaveSlotsAPI
 #: unrecognised one.
 DEFAULT_PLAY_LAYOUT = "classic"
 
+#: A reference a resolver already built as a URI, rather than a path to
+#: turn into one. Two or more scheme characters, so a Windows drive
+#: letter ("C:/games/...") stays a path.
+_URI_SCHEME = re.compile(r"^[A-Za-z][A-Za-z0-9+.-]+:")
+
 
 def _to_file_uri(path_str: str) -> str:
-    """Convert one resolved absolute filesystem path to a `file://` URI.
+    """Convert one resolved media reference to something an `<img>` can load.
+
+    A game played from a folder resolves to an absolute filesystem path,
+    which becomes a `file://` URI. A game played from a bundle has no
+    filesystem path at all and resolves to a `data:` URI already carrying
+    the bytes; that is returned unchanged, since it is what the page
+    loads.
 
     Args:
-        path_str: An absolute path string (as `FilesystemMediaResolver.
-            resolve()` returns).
+        path_str: An absolute path, or a URI a resolver already built.
 
     Returns:
-        The `file://` URI pywebview's own `ALLOW_FILE_URLS` setting can
-        load directly as an `<img>`/`<video>` `src`.
+        A URI an `<img>`/`<video>` `src` can load.
     """
+    if _URI_SCHEME.match(path_str):
+        return path_str
     return Path(path_str).as_uri()
 
 
@@ -76,7 +91,7 @@ class PlayerAPI(SaveSlotsAPI):
             A path alongside this instance's own settings file, named
             after the game folder so multiple games never collide.
         """
-        return self.settings_path.parent / "saves" / f"{game_dir.resolve().name}.json"
+        return self.settings_path.parent / "saves" / f"{game_identity(game_dir)}.json"
 
     def _saves_dir(self) -> Path:
         """Return the directory `save_slots.py`'s own named slots live under.
@@ -103,7 +118,7 @@ class PlayerAPI(SaveSlotsAPI):
         Returns:
             `<saves_dir>/<game_dir.name>/quicksave.json`.
         """
-        return self._saves_dir() / game_dir.resolve().name / "quicksave.json"
+        return self._saves_dir() / game_identity(game_dir) / "quicksave.json"
 
     # -- Trust ---------------------------------------------------------
 
@@ -169,6 +184,33 @@ class PlayerAPI(SaveSlotsAPI):
         settings_store.save_settings(self.settings_path, settings)
         return {"prefs": settings_store.get_reader_prefs(settings)}
 
+    def get_strict_externals(self) -> bool:
+        """Return whether strict-externals mode is on.
+
+        Returns:
+            True if an unbound EXTERNAL raises rather than falling
+            through to the story's own Ink stub.
+        """
+        return settings_store.is_strict_externals(settings_store.load_settings(self.settings_path))
+
+    def set_strict_externals(self, enabled: bool) -> dict[str, Any]:
+        """Turn strict-externals mode on or off, persisting the choice.
+
+        Takes effect on the next `open_game()`: a live session keeps the
+        mode it was opened with, so a game does not change behaviour
+        mid-play.
+
+        Args:
+            enabled: Whether an unbound EXTERNAL should raise.
+
+        Returns:
+            `{"strict_externals": <bool>}`, the saved value.
+        """
+        settings = settings_store.load_settings(self.settings_path)
+        settings = settings_store.set_strict_externals(settings, enabled)
+        settings_store.save_settings(self.settings_path, settings)
+        return {"strict_externals": settings_store.is_strict_externals(settings)}
+
     # -- Turn loop -------------------------------------------------------
 
     def open_game(self, game_dir: str) -> dict[str, Any]:
@@ -195,33 +237,45 @@ class PlayerAPI(SaveSlotsAPI):
         path = Path(game_dir)
         settings = settings_store.load_settings(self.settings_path)
         trusted = settings_store.is_folder_trusted(settings, path)
-        required_plugins = read_required_plugins(path)
         reader_prefs = settings_store.get_reader_prefs(settings)
+        strict_externals = settings_store.is_strict_externals(settings)
 
+        try:
+            source = open_game_source(path)
+        except GameSourceError as error:
+            return {"error": str(error)}
+
+        required_plugins = read_required_plugins(source)
         if required_plugins and not trusted:
             return {
                 "needs_trust": True,
-                "play_layout": read_play_layout(path) or DEFAULT_PLAY_LAYOUT,
-                "prose_styles": find_prose_styles(path),
+                "play_layout": read_play_layout(source) or DEFAULT_PLAY_LAYOUT,
+                "prose_styles": find_prose_styles(source),
                 "reader_prefs": reader_prefs,
             }
 
-        plugins = discover_session_plugins(path, trusted=trusted)
+        self._release_mount()
+        mount = mount_game(path) if trusted and source.exists("__init__.py") else None
+        plugins = discover_session_plugins(trusted=trusted, mount=mount)
         saved_state = None
         save_path = self._save_file_path(path)
         if save_path.is_file():
             saved_state = json.loads(save_path.read_text(encoding="utf-8"))
 
         try:
-            self.session = game_session.open_game(path, saved_state, plugins, required_plugins, trusted)
+            self.session = game_session.open_game(
+                path, saved_state, plugins, required_plugins, trusted, strict_externals=strict_externals, mount=mount, source=source
+            )
         except GameFolderError as error:
             return {"error": str(error)}
+        except UnboundExternalError as error:
+            return {"error": f"Unbound EXTERNAL: {error}"}
 
         self._write_save()
         context = self._session_context()
         context["needs_trust"] = False
-        context["play_layout"] = read_play_layout(path) or DEFAULT_PLAY_LAYOUT
-        context["prose_styles"] = find_prose_styles(path)
+        context["play_layout"] = read_play_layout(source) or DEFAULT_PLAY_LAYOUT
+        context["prose_styles"] = find_prose_styles(source)
         context["reader_prefs"] = reader_prefs
         return context
 
@@ -235,7 +289,8 @@ class PlayerAPI(SaveSlotsAPI):
 
         Returns:
             `{"stale": True}` on a stale submission, `{"error": ...}` if
-            no game is open, otherwise a turn context dict.
+            no game is open, the choice is out of range, or strict-externals
+            mode caught an unwired EXTERNAL, otherwise a turn context dict.
         """
         if self.session is None:
             return {"error": "No game is open"}
@@ -243,6 +298,8 @@ class PlayerAPI(SaveSlotsAPI):
             result = game_session.choose(self.session, choice_index, turn_count)
         except IndexError:
             return {"error": "Invalid choice"}
+        except UnboundExternalError as error:
+            return {"error": f"Unbound EXTERNAL: {error}"}
         if result.get("stale"):
             return result
         self._write_save()
@@ -343,6 +400,18 @@ class PlayerAPI(SaveSlotsAPI):
 
     # -- Internal ----------------------------------------------------------
 
+    def _release_mount(self) -> None:
+        """Release the open game's importable package, if any.
+
+        Called before opening another: a game's plugin modules stay in
+        `sys.modules` while it plays, so leaving them there means the
+        next game whose package shares this one's name silently gets
+        these modules instead of its own.
+        """
+        if self.session is not None and self.session.mount is not None:
+            self.session.mount.unmount()
+            self.session.mount = None
+
     def _write_save(self) -> None:
         """Persist the current session's full state to its save file."""
         if self.session is None:
@@ -374,11 +443,13 @@ class PlayerAPI(SaveSlotsAPI):
             context: A turn context dict, straight from `game_session`.
 
         Returns:
-            The same dict, with `image_urls` converted and `panel`
-            attached.
+            The same dict, with the turn's own `image_urls` and each
+            choice's converted, and `panel` attached.
         """
         if self.session is not None:
             context["image_urls"] = [_to_file_uri(p) for p in context.get("image_urls", [])]
+            for choice in context.get("choices", []):
+                choice["image_urls"] = [_to_file_uri(p) for p in choice.get("image_urls", [])]
             context["panel"] = panel.panel_context(self.session, self.session.state.globals)
         return context
 
@@ -394,10 +465,33 @@ class PlayerAPI(SaveSlotsAPI):
         cover = find_cover_image(Path(game_dir))
         return _to_file_uri(cover) if cover is not None else None
 
+    def pick_game_bundle(self) -> str | None:
+        """Show a native file-picker filtered to game bundles.
+
+        The primary "open a game" affordance: a bundle is how a game is
+        published and what carries the integrity record a player's copy
+        is checked against. `pick_game_folder()` is the development
+        alternative, for an author editing a game in place.
+
+        Returns:
+            The chosen bundle's path, or None if the dialog was
+            cancelled.
+        """
+        result = webview.windows[0].create_file_dialog(
+            dialog_type=webview.OPEN_DIALOG,
+            file_types=("Game bundle (*.zip)", "All files (*.*)"),
+        )
+        return result[0] if result else None
+
     def pick_game_folder(self) -> str | None:
         """Show a native folder-picker dialog and return the chosen path.
 
-        The one place in `if_player` that touches `pywebview`'s own
+        **For development**, not the ordinary way to open a game: a game
+        folder is what an author edits, while a player receives a bundle
+        (`pick_game_bundle()`). A folder carries no integrity record, so
+        opening one skips the verification a bundle gets.
+
+        One of two places in `if_player` that touch `pywebview`'s own
         window object directly -- `webview.windows[0]` is this app's own
         single window (`main.py` creates exactly one), matching a
         desktop app's own single-window "open a game" affordance; there

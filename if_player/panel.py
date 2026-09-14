@@ -11,9 +11,11 @@ from __future__ import annotations
 
 import importlib
 import logging
-from typing import Any, Callable
+from typing import Any
 
-from if_player.game_session import GameSession, bindings_for
+from ink_engine import game_panel
+
+from if_player.game_session import GameSession, session_bindings
 
 logger = logging.getLogger(__name__)
 
@@ -26,55 +28,36 @@ def _sidebar_module(session: GameSession) -> Any:
 
     Returns:
         The module, or None when this session is untrusted or its game
-        folder has no `sidebar.py`.
+        has no `sidebar.py`. The package comes from the session's own
+        mount: a bundle's package name is whatever it holds inside,
+        which its filename need not match.
     """
     if not session.trusted:
         return None
     try:
-        return importlib.import_module(f"{session.game_dir.name}.sidebar")
+        package = session.mount.package if session.mount is not None else session.game_dir.name
+        return importlib.import_module(f"{package}.sidebar")
     except ModuleNotFoundError:
         return None
 
 
-def _run_sidebar_hook(session: GameSession, hook_name: str, globals_: dict[str, Any], *extra_args: str, default: str | dict[str, Any] | None) -> Any:
-    """Look up and call one of a trusted game's own `sidebar.py` hooks.
-
-    Shared by `panel_context()`/`panel_action()`/`panel_command()`:
-    all three locate the same optional hook on the same module and call
-    it as `hook(engine_state, globals_, bindings, *extra_args)`, falling
-    back to `default` if the session is untrusted, the hook is missing,
-    it raises, or it returns something other than `type(default)` (with
-    `None` -- `panel_context()`'s own default -- treated as "any dict is
-    acceptable").
+def _hook_arguments(session: GameSession, globals_: dict[str, Any]) -> dict[str, Any]:
+    """Build the three arguments every panel hook receives.
 
     Args:
         session: The live `GameSession`.
-        hook_name: The attribute name to look up on `sidebar.py` (e.g.
-            "panel_context").
-        globals_: The runtime's own Ink globals, passed to the hook.
-        *extra_args: Any positional arguments beyond
-            `(engine_state, globals_, bindings)` (e.g. `action_id`/
-            `target_id`).
-        default: What to return if the hook is absent, raises, or
-            answers the wrong type -- also fixes the expected return
-            type (`str` or, for `None`, `dict`).
+        globals_: The runtime's own Ink globals.
 
     Returns:
-        The hook's own return value if it ran and matched the expected
-        type, otherwise `default`.
+        The `module`/`engine_state`/`globals_`/`bindings` keyword bundle
+        `ink_engine.game_panel`'s own hook callers expect.
     """
-    module = _sidebar_module(session)
-    hook: Callable[..., Any] | None = getattr(module, hook_name, None) if module is not None else None
-    if not callable(hook):
-        return default
-    bindings = bindings_for(session.plugins, list(session.engine_state.keys()), session.engine_state, trusted=session.trusted)
-    try:
-        result = hook(session.engine_state, globals_, bindings, *extra_args)
-    except Exception:  # pylint: disable=broad-except
-        logger.exception("if_player.panel: game %r %s failed", session.game_dir.name, hook_name)
-        return default
-    expected_type = dict if default is None else type(default)
-    return result if isinstance(result, expected_type) else default
+    return {
+        "engine_state": session.engine_state,
+        "globals_": globals_,
+        "bindings": session_bindings(session),
+        "logger": logger,
+    }
 
 
 def panel_context(session: GameSession, globals_: dict[str, Any]) -> dict[str, Any] | None:
@@ -89,7 +72,7 @@ def panel_context(session: GameSession, globals_: dict[str, Any]) -> dict[str, A
         panel (or is untrusted, or its module exposes no
         `panel_context()`, or it raises).
     """
-    return _run_sidebar_hook(session, "panel_context", globals_, default=None)
+    return game_panel.panel_context(_sidebar_module(session), **_hook_arguments(session, globals_))
 
 
 def panel_action(session: GameSession, globals_: dict[str, Any], action_id: str, target_id: str) -> str:
@@ -106,7 +89,7 @@ def panel_action(session: GameSession, globals_: dict[str, Any], action_id: str,
         for an untrusted session, a game with no panel, or one that
         raises.
     """
-    return _run_sidebar_hook(session, "panel_action", globals_, action_id, target_id, default="")
+    return game_panel.panel_action(_sidebar_module(session), **_hook_arguments(session, globals_), action_id=action_id, target_id=target_id)
 
 
 def panel_command(session: GameSession, globals_: dict[str, Any], command_id: str, target_id: str) -> str:
@@ -129,4 +112,4 @@ def panel_command(session: GameSession, globals_: dict[str, Any], command_id: st
         for an untrusted session, a game with no panel, or one that
         raises.
     """
-    return _run_sidebar_hook(session, "panel_command", globals_, command_id, target_id, default="")
+    return game_panel.panel_command(_sidebar_module(session), **_hook_arguments(session, globals_), command_id=command_id, target_id=target_id)

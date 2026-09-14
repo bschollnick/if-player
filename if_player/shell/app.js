@@ -19,7 +19,7 @@
 
   function bindElements() {
     [
-      "library-view", "open-folder-button", "library-error",
+      "library-view", "open-bundle-button", "open-folder-button", "library-error",
       "trust-prompt", "trust-folder-name", "trust-decline", "trust-accept",
       "play-view", "sidebar", "back-to-library", "undo-button", "restart-button",
       "saves-button", "save-status", "settings-button",
@@ -40,8 +40,34 @@
     return id.replace(/-([a-z])/g, function (_, c) { return c.toUpperCase(); });
   }
 
+  // Every pywebview js_api method returns a Promise. If the Python side
+  // raises, pywebview rejects that Promise (webview/js/api.js) rather
+  // than resolving it -- so a bare .then() would run nothing at all and
+  // the window would appear to freeze with no message.
+  //
+  // api() therefore hands back a wrapper whose methods always RESOLVE:
+  // a rejection becomes {error: "..."}, the same shape every call site
+  // already checks for. One place to get this right instead of twenty.
   function api() {
-    return window.pywebview.api;
+    var real = window.pywebview.api;
+    var wrapped = {};
+    Object.keys(real).forEach(function (name) {
+      if (typeof real[name] !== "function") return;
+      wrapped[name] = function () {
+        return Promise.resolve(real[name].apply(real, arguments)).catch(function (error) {
+          return { error: describeError(error) };
+        });
+      };
+    });
+    return wrapped;
+  }
+
+  function describeError(error) {
+    if (!error) return "The player stopped responding to that action.";
+    // pywebview rebuilds the Python exception as a real Error, carrying
+    // the original type in .name.
+    if (error.name && error.message) return error.name + ": " + error.message;
+    return String(error.message || error);
   }
 
   // -- Story-text escaping ------------------------------------------------
@@ -101,12 +127,21 @@
     }
   }
 
+  function openBundlePicker() {
+    // The ordinary way to open a game: a bundle is what a player
+    // receives, and the only form carrying an integrity record.
+    api().pick_game_bundle().then(function (bundle) {
+      if (bundle && bundle.error) { showLibrary(bundle.error); return; }
+      if (bundle) openGame(bundle);
+    });
+  }
+
   function openFolderPicker() {
-    // pywebview's own native folder dialog -- exposed as a second js_api
-    // method (create_file_dialog wraps webview.windows[0].create_file_dialog
-    // with FOLDER_DIALOG) rather than reimplemented in JS, since only the
-    // Python side can show a native OS dialog.
+    // For developing a game, not for playing one. Only the Python side
+    // can show a native OS dialog, so both pickers are js_api methods
+    // rather than reimplemented here.
     api().pick_game_folder().then(function (folder) {
+      if (folder && folder.error) { showLibrary(folder.error); return; }
       if (folder) openGame(folder);
     });
   }
@@ -141,7 +176,8 @@
   }
 
   function acceptTrust() {
-    api().confirm_trust(state.gameDir).then(function () {
+    api().confirm_trust(state.gameDir).then(function (result) {
+      if (result && result.error) { showLibrary(result.error); return; }
       openGame(state.gameDir);
     });
   }
@@ -195,6 +231,14 @@
     els.undoButton.hidden = !context.can_undo;
 
     renderPanel(context.panel);
+    showCurrentTurn();
+  }
+
+  function showCurrentTurn() {
+    // The transcript grows above the current turn, so without this the
+    // new text arrives below the fold of a column that only ever scrolls
+    // on its own.
+    if (els.storyColumn) els.storyColumn.scrollTop = els.currentTurn.offsetTop - els.storyColumn.offsetTop;
   }
 
   function renderTranscript(transcript) {
@@ -221,13 +265,27 @@
 
   function renderChoices(choices) {
     els.choicesList.innerHTML = "";
-    choices.forEach(function (pair) {
-      var index = pair[0];
-      var text = pair[1];
+    choices.forEach(function (choice) {
+      var index = choice.index;
+      var images = choice.image_urls || [];
       var button = document.createElement("button");
-      button.className = "choice-button";
+      button.className = images.length ? "choice-button has-image" : "choice-button";
       button.dataset.choiceKey = String(index + 1);
-      button.innerHTML = storyHtml(text) + '<span class="choice-key">' + (index + 1) + "</span>";
+      button.innerHTML =
+        '<span class="choice-label">' + storyHtml(choice.text) + "</span>" +
+        '<span class="choice-key">' + (index + 1) + "</span>";
+      // A choice can carry its own picture (`* [As a cleaner # image:
+      // x.jpg]`), which is how the original game asks the player to pick
+      // a character's model by appearance rather than by description.
+      // Built as real elements, so a resolved URL is never parsed as markup.
+      var label = button.firstChild;
+      images.forEach(function (url) {
+        var image = document.createElement("img");
+        image.className = "choice-image";
+        image.src = url;
+        image.alt = "";
+        button.insertBefore(image, label);
+      });
       button.addEventListener("click", function () { submitChoice(index); });
       els.choicesList.appendChild(button);
     });
@@ -304,6 +362,7 @@
 
   function refreshSavesList() {
     api().list_saves().then(function (result) {
+      if (result.error) { showSaveStatus(result.error); return; }
       renderSavesList(result.slots || []);
     });
   }
@@ -431,6 +490,7 @@
     var textWidth = document.querySelector('#settings-modal input[name="text-width"]:checked');
     api().set_reader_prefs(fontSize ? fontSize.value : state.readerPrefs.font_size, textWidth ? textWidth.value : state.readerPrefs.text_width).then(
       function (result) {
+        if (result.error) { showSaveStatus(result.error); return; }
         state.readerPrefs = result.prefs;
         applyBodyClasses();
       }
@@ -548,19 +608,23 @@
 
   function runPanelAction(actionId, target) {
     api().panel_action(actionId, target).then(function (result) {
-      renderPanelDetail(result.detail_text || "");
+      renderPanelDetail(result.error || result.detail_text || "");
     });
   }
 
   function runPanelCommand(commandId, target) {
     api().panel_command(commandId, target, state.turnCount).then(function (context) {
+      if (context.error) { renderPanelDetail(context.error); return; }
       if (context.stale) { reopenAfterStale(); return; }
       renderPanel(context);
     });
   }
 
   function switchPanelTab(tabId) {
-    api().panel_tab(tabId).then(renderPanel);
+    api().panel_tab(tabId).then(function (context) {
+      if (context.error) { renderPanelDetail(context.error); return; }
+      renderPanel(context);
+    });
   }
 
   function renderPanelDetail(detailText) {
@@ -571,6 +635,7 @@
 
   function init() {
     bindElements();
+    els.openBundleButton.addEventListener("click", openBundlePicker);
     els.openFolderButton.addEventListener("click", openFolderPicker);
     els.trustAccept.addEventListener("click", acceptTrust);
     els.trustDecline.addEventListener("click", declineTrust);
