@@ -234,11 +234,41 @@
     showCurrentTurn();
   }
 
+  // Put the current turn at the top of the story column. The transcript
+  // above it runs to every past turn, so without this a turn arrives below
+  // the fold. Anchored on the "Current turn" divider rather than the text
+  // under it, so the divider itself stays visible.
   function showCurrentTurn() {
-    // The transcript grows above the current turn, so without this the
-    // new text arrives below the fold of a column that only ever scrolls
-    // on its own.
-    if (els.storyColumn) els.storyColumn.scrollTop = els.currentTurn.offsetTop - els.storyColumn.offsetTop;
+    var column = els.storyColumn;
+    if (!column) return;
+    var anchor = els.currentTurnDivider && !els.currentTurnDivider.hidden
+      ? els.currentTurnDivider
+      : els.currentTurn;
+    if (!anchor) return;
+
+    // Measured, not computed from offsetTop: `.turn-divider` is
+    // `position: relative`, so it is its own offset parent and offsetTop
+    // is relative to it rather than to the column. Rects are in the same
+    // viewport space whatever the positioning, and the delta between them
+    // is exactly how far the column still has to scroll. The column's own
+    // top padding is taken off so the anchor lands at the very top rather
+    // than one padding-height below it.
+    function scrollToAnchor() {
+      var padding = parseFloat(getComputedStyle(column).paddingTop) || 0;
+      var delta = anchor.getBoundingClientRect().top - column.getBoundingClientRect().top - padding;
+      column.scrollTop += delta;
+    }
+    scrollToAnchor();
+    // Again after the browser has laid the new turn out: the first call
+    // measures content that was written to the DOM moments ago, and a
+    // reflow still pending at that point moves the anchor afterwards.
+    requestAnimationFrame(scrollToAnchor);
+    // Story images load after this runs and push the layout down, which
+    // would leave the anchor scrolled back out of view.
+    var images = els.currentTurn ? els.currentTurn.querySelectorAll("img") : [];
+    Array.prototype.forEach.call(images, function (image) {
+      if (!image.complete) image.addEventListener("load", scrollToAnchor, { once: true });
+    });
   }
 
   function renderTranscript(transcript) {
@@ -616,7 +646,11 @@
     api().panel_command(commandId, target, state.turnCount).then(function (context) {
       if (context.error) { renderPanelDetail(context.error); return; }
       if (context.stale) { reopenAfterStale(); return; }
-      renderPanel(context);
+      // A command can unlock a choice, so the whole turn is re-rendered,
+      // not just the panel. The command's own reply goes in the panel
+      // detail, where the player invoked it.
+      renderTurn(context);
+      renderPanelDetail(context.panel_detail || "");
     });
   }
 

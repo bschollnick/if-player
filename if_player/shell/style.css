@@ -46,6 +46,14 @@ body {
   line-height: 1.5;
 }
 
+/* The window is created with text_select=True so the story can be selected
+   and copied; controls are exempted so a click-drag on one does not select
+   its label. */
+button, .panel-tabs, .choice-key, #sidebar {
+  -webkit-user-select: none;
+  user-select: none;
+}
+
 button {
   font: inherit;
   cursor: pointer;
@@ -148,6 +156,15 @@ body.layout-three_column #play-view {
   padding: 1.5em 2em 4em;
   max-width: 46em;
   overflow-y: auto;
+}
+
+/* Room below the last turn so it can actually reach the top of the column.
+   Without it a short turn cannot be scrolled up: the browser stops at the
+   end of the content, leaving the turn stranded near the bottom. */
+#story-column::after {
+  content: "";
+  display: block;
+  height: calc(100vh - 12em);
 }
 
 body.layout-three_column #story-column { max-width: none; }

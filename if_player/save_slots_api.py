@@ -18,6 +18,7 @@ from typing import Any
 import webview
 from ink_engine.engine import UnboundExternalError
 from ink_engine.game_folder import read_required_plugins
+from webview import FileDialog
 
 from if_player.game_session import GameSession, build_saved_state, open_game
 from if_player.plugin_sources import discover_session_plugins
@@ -39,6 +40,44 @@ from if_player.settings_store import (
 #: The label written for a quicksave -- a quicksave is a single
 #: dedicated slot outside the five numbered `save_slots.py` slots.
 QUICKSAVE_LABEL = "Quicksave"
+
+
+def chosen_path(result: object) -> str | None:
+    """Return the single path a file dialog chose, whatever shape it used.
+
+    pywebview's dialogs are not symmetric: an open/folder dialog answers a
+    TUPLE of paths, while a save dialog answers a bare STRING (macOS:
+    `NSSavePanel.filename()`). Indexing [0] blindly turns that string into
+    its first character -- "/" -- which then looks like a real destination
+    and fails only at the point of writing.
+
+    Args:
+        result: Whatever `create_file_dialog()` returned.
+
+    Returns:
+        The chosen path, or None when the dialog was cancelled.
+    """
+    if not result:
+        return None
+    if isinstance(result, str):
+        return result
+    return str(result[0])
+
+
+def _default_export_directory() -> str:
+    """Return where an exported save file should be offered.
+
+    pywebview starts a dialog with no `directory` at the process's own
+    working directory, which for a launched app is "/" -- the export then
+    defaults to writing into the filesystem root. A save the player keeps
+    belongs with their own documents.
+
+    Returns:
+        The user's Documents directory, or their home directory when no
+        Documents directory exists.
+    """
+    documents = Path.home() / "Documents"
+    return str(documents if documents.is_dir() else Path.home())
 
 
 class SaveSlotsAPI:
@@ -236,7 +275,13 @@ class SaveSlotsAPI:
             envelope = export_slot(self._saves_dir(), self.session.game_dir, slot)
         except SaveSlotError as error:
             return {"error": str(error)}
-        Path(destination).write_text(json.dumps(envelope, indent=2), encoding="utf-8")
+        target = Path(destination)
+        if target.is_dir():
+            return {"error": f"'{destination}' is a folder, not a file"}
+        try:
+            target.write_text(json.dumps(envelope, indent=2), encoding="utf-8")
+        except OSError as error:
+            return {"error": f"Could not write '{destination}': {error}"}
         return {"exported": True}
 
     def import_save(self, slot: int, source: str) -> dict[str, Any]:
@@ -273,8 +318,12 @@ class SaveSlotsAPI:
         Returns:
             The chosen path, or None if the dialog was cancelled.
         """
-        result = webview.windows[0].create_file_dialog(dialog_type=webview.SAVE_DIALOG, save_filename=suggested_filename)
-        return result[0] if result else None
+        result = webview.windows[0].create_file_dialog(
+            dialog_type=FileDialog.SAVE,
+            directory=_default_export_directory(),
+            save_filename=suggested_filename,
+        )
+        return chosen_path(result)
 
     def pick_save_file(self) -> str | None:
         """Show a native open-file dialog for importing a save file.
@@ -282,8 +331,12 @@ class SaveSlotsAPI:
         Returns:
             The chosen path, or None if the dialog was cancelled.
         """
-        result = webview.windows[0].create_file_dialog(dialog_type=webview.OPEN_DIALOG, file_types=("Save files (*.json)", "All files (*.*)"))
-        return result[0] if result else None
+        result = webview.windows[0].create_file_dialog(
+            dialog_type=FileDialog.OPEN,
+            directory=_default_export_directory(),
+            file_types=("Save files (*.json)", "All files (*.*)"),
+        )
+        return chosen_path(result)
 
     # -- Quicksave / quickload --------------------------------------------
     #

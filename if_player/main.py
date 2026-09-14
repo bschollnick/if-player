@@ -23,7 +23,16 @@ def main() -> None:
     """Start the standalone IF Player window."""
     webview.settings["ALLOW_FILE_URLS"] = True
     api = PlayerAPI()
-    webview.create_window("IF Player", url=str(SHELL_DIR / "index.html"), js_api=api, width=1100, height=800)
+    # text_select defaults to False, which injects `user-select: none` over
+    # the whole body: a reader could not select or copy any of the story.
+    webview.create_window(
+        "IF Player",
+        url=str(SHELL_DIR / "index.html"),
+        js_api=api,
+        width=1100,
+        height=800,
+        text_select=True,
+    )
     webview.start()
 
 

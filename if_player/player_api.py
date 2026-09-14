@@ -26,11 +26,12 @@ from ink_engine.game_folder import (
 )
 from ink_engine.game_source import GameSourceError, game_identity, open_game_source
 from ink_engine.media_resolver import find_cover_image, find_prose_styles
+from webview import FileDialog
 
 from if_player import game_session, panel, settings_store
 from if_player.game_session import GameSession
 from if_player.plugin_sources import discover_session_plugins
-from if_player.save_slots_api import SaveSlotsAPI
+from if_player.save_slots_api import SaveSlotsAPI, chosen_path
 
 #: The default layout when a game's own manifest declares none / an
 #: unrecognised one.
@@ -394,9 +395,33 @@ class PlayerAPI(SaveSlotsAPI):
         self.session.previous_state = self._snapshot_state()
         self._write_save()
 
-        context = panel.panel_context(self.session, self.session.state.globals) or {}
+        # A command can unlock a choice (giving an item, learning a spell),
+        # and the turn's choices were evaluated before it ran. Source
+        # redisplays the whole place for exactly this (`items.js:1261`,
+        # `dispPlace()` on a command answering "refresh").
+        self.session.state.refresh_choices()
+        context = self._add_media_and_panel(self._session_context())
         context["panel_detail"] = text
         return context
+
+    def _dialog_start_directory(self) -> str:
+        """Return where a file dialog should open.
+
+        pywebview starts a dialog with no `directory` at the process's own
+        working directory, which for a launched app is "/". Offering the
+        folder the open game came from means reopening lands where the
+        player keeps their games.
+
+        Returns:
+            The open game's own directory, else the user's Documents
+            directory, else their home directory.
+        """
+        if self.session is not None:
+            parent = Path(self.session.game_dir).parent
+            if parent.is_dir():
+                return str(parent)
+        documents = Path.home() / "Documents"
+        return str(documents if documents.is_dir() else Path.home())
 
     # -- Internal ----------------------------------------------------------
 
@@ -478,10 +503,11 @@ class PlayerAPI(SaveSlotsAPI):
             cancelled.
         """
         result = webview.windows[0].create_file_dialog(
-            dialog_type=webview.OPEN_DIALOG,
+            dialog_type=FileDialog.OPEN,
+            directory=self._dialog_start_directory(),
             file_types=("Game bundle (*.zip)", "All files (*.*)"),
         )
-        return result[0] if result else None
+        return chosen_path(result)
 
     def pick_game_folder(self) -> str | None:
         """Show a native folder-picker dialog and return the chosen path.
@@ -501,5 +527,5 @@ class PlayerAPI(SaveSlotsAPI):
             The chosen folder's path, or None if the dialog was
             cancelled.
         """
-        result = webview.windows[0].create_file_dialog(dialog_type=webview.FOLDER_DIALOG)
-        return result[0] if result else None
+        result = webview.windows[0].create_file_dialog(dialog_type=FileDialog.FOLDER, directory=self._dialog_start_directory())
+        return chosen_path(result)

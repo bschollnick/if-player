@@ -12,6 +12,7 @@ from pathlib import Path
 from unittest import TestCase
 
 from if_player.player_api import PlayerAPI
+from if_player.save_slots_api import chosen_path
 
 FIXTURES = Path(__file__).parent / "fixtures"
 SIMPLE_GAME = FIXTURES / "simple_game"
@@ -177,3 +178,26 @@ class QuicksaveQuickloadTests(SaveSlotsAPITestCase):
     def test_has_quicksave_before_any_game_is_open_returns_false(self):
         fresh_api = PlayerAPI(settings_path=self.tmp / "settings2.json")
         self.assertFalse(fresh_api.has_quicksave())
+
+
+class ChosenPathTests(TestCase):
+    """pywebview's dialogs disagree on shape: open/folder answer a tuple of
+    paths, save answers a bare string. Indexing [0] blindly turned a save
+    path into its first character, "/", which failed only on write."""
+
+    def test_a_save_dialogs_bare_string_is_returned_whole(self):
+        self.assertEqual(chosen_path("/Users/me/save-slot-1.json"), "/Users/me/save-slot-1.json")
+
+    def test_an_open_dialogs_tuple_yields_its_first_path(self):
+        self.assertEqual(chosen_path(("/Users/me/game.zip",)), "/Users/me/game.zip")
+
+    def test_a_cancelled_dialog_is_none(self):
+        for cancelled in (None, (), ""):
+            self.assertIsNone(chosen_path(cancelled))
+
+
+class ExportGuardTests(SaveSlotsAPITestCase):
+    def test_exporting_onto_a_directory_reports_an_error(self):
+        self.api.save_to_slot(0, "label")
+        result = self.api.export_save(0, str(self.tmp))
+        self.assertIn("folder", result.get("error", ""))
