@@ -17,10 +17,12 @@ from pathlib import Path
 from typing import Any
 
 import webview
+from if_session import session_state
 from ink_engine.discovery import mount_game
 from ink_engine.engine import UnboundExternalError
 from ink_engine.game_folder import (
     GameFolderError,
+    plugin_denied_text,
     read_play_layout,
     read_required_plugins,
 )
@@ -95,31 +97,16 @@ class PlayerAPI(SaveSlotsAPI):
         return self.settings_path.parent / "saves" / f"{game_identity(game_dir)}.json"
 
     def _saves_dir(self) -> Path:
-        """Return the directory `save_slots.py`'s own named slots live under.
+        """Return the directory the named game saves live under.
 
         Returns:
             A directory sibling to `_save_file_path()`'s own auto-save
             file, so a game's every persisted file (auto-save, named
-            slots, quicksave) lives under the same settings-relative
-            root.
+            saves, quicksave) lives under the same settings-relative
+            root. The `save_slots` name is what players already have on
+            disk; renaming it would orphan their existing saves.
         """
         return self.settings_path.parent / "save_slots"
-
-    def _quicksave_path(self, game_dir: Path) -> Path:
-        """Return the one quicksave file path for a game folder.
-
-        A single dedicated slot outside the five numbered `save_slots.py`
-        slots, under its own reserved filename in the same directory so
-        listing a game's saves only needs to look in one place. A second
-        quicksave simply overwrites the first.
-
-        Args:
-            game_dir: The game folder's real filesystem path.
-
-        Returns:
-            `<saves_dir>/<game_dir.name>/quicksave.json`.
-        """
-        return self._saves_dir() / game_identity(game_dir) / "quicksave.json"
 
     # -- Trust ---------------------------------------------------------
 
@@ -250,6 +237,12 @@ class PlayerAPI(SaveSlotsAPI):
         if required_plugins and not trusted:
             return {
                 "needs_trust": True,
+                # The game's own account of what its plugins do and why
+                # they need permission -- only it knows that
+                # `asfa_occupancy` missing means no character is anywhere.
+                # A game shipping none gets a listing of the names.
+                "plugin_denied_text": plugin_denied_text(source),
+                "required_plugins": list(required_plugins),
                 "play_layout": read_play_layout(source) or DEFAULT_PLAY_LAYOUT,
                 "prose_styles": find_prose_styles(source),
                 "reader_prefs": reader_prefs,
@@ -268,6 +261,10 @@ class PlayerAPI(SaveSlotsAPI):
                 path, saved_state, plugins, required_plugins, trusted, strict_externals=strict_externals, mount=mount, source=source
             )
         except GameFolderError as error:
+            return {"error": str(error)}
+        except session_state.SaveFormatError as error:
+            # Returning here leaves the save file untouched -- _write_save()
+            # below would otherwise overwrite the very save being refused.
             return {"error": str(error)}
         except UnboundExternalError as error:
             return {"error": f"Unbound EXTERNAL: {error}"}

@@ -4,6 +4,11 @@ pure file-organization split: `PlayerAPI` inherits this mixin, so every
 method here becomes a real `window.pywebview.api.<name>` method exactly
 as if declared directly on `PlayerAPI`.
 
+The slot logic itself lives in `if_session.game_saves`, shared with the
+web application. This module supplies the game identity and the
+directory, converts the library's exceptions into the no-raise
+`{"error": ...}` contract the UI expects, and owns the file dialogs.
+
 Reaches into `self.session`/`self.settings_path` and several
 underscore-prefixed helpers defined on `PlayerAPI` itself. Not meant to
 be used standalone.
@@ -12,34 +17,45 @@ be used standalone.
 from __future__ import annotations
 
 import json
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
 import webview
+from if_session import session_state
+from if_session.game_saves import (
+    GameSavesDirectory,
+    GameSaveError,
+    delete_game_save,
+    export_game_save,
+    import_game_save,
+    is_from_another_build,
+    list_game_saves,
+    load_game_save,
+    save_game,
+)
+
+# Aliased because the js_api methods below share these three names.
+# Python would resolve the bare names correctly -- a method body reads
+# module globals, not the class namespace -- but it reads as recursion.
+from if_session.game_saves import has_quicksave as library_has_quicksave
+from if_session.game_saves import quickload as library_quickload
+from if_session.game_saves import quicksave as library_quicksave
 from ink_engine.engine import UnboundExternalError
 from ink_engine.game_folder import read_required_plugins
+from ink_engine.game_source import game_build, game_identity
 from webview import FileDialog
 
 from if_player.game_session import GameSession, build_saved_state, open_game
 from if_player.plugin_sources import discover_session_plugins
-from if_player.save_slots import (
-    SaveSlotError,
-    delete_slot,
-    export_slot,
-    import_slot,
-    list_slots,
-    load_slot,
-    save_slot,
-)
 from if_player.settings_store import (
     is_folder_trusted,
     is_strict_externals,
     load_settings,
 )
 
-#: The label written for a quicksave -- a quicksave is a single
-#: dedicated slot outside the five numbered `save_slots.py` slots.
-QUICKSAVE_LABEL = "Quicksave"
+#: How many numbered save slots this player offers per game.
+MAX_SAVE_SLOTS = 5
 
 
 def chosen_path(result: object) -> str | None:
@@ -61,7 +77,19 @@ def chosen_path(result: object) -> str | None:
         return None
     if isinstance(result, str):
         return result
-    return str(result[0])
+    if isinstance(result, (tuple, list)):
+        return str(result[0])
+    # Neither shape pywebview documents. Treating it as a path would
+    # produce a plausible-looking destination that fails at write time.
+    return None
+
+
+def _now() -> str:
+    """Return the current time as the ISO-8601 string a save records.
+
+    The library never reads a clock, so the application supplies one.
+    """
+    return datetime.now(timezone.utc).isoformat()
 
 
 def _default_export_directory() -> str:
@@ -108,9 +136,29 @@ class SaveSlotsAPI:
         """Defined on `PlayerAPI`; declared here for type-checking only."""
         raise NotImplementedError
 
-    def _quicksave_path(self, game_dir: Path) -> Path:
-        """Defined on `PlayerAPI`; declared here for type-checking only."""
-        raise NotImplementedError
+    def _game_saves_directory(self) -> GameSavesDirectory:
+        """Return the directory this game's saves are kept in."""
+        return GameSavesDirectory(self._saves_dir())
+
+    def _game_build(self) -> str:
+        """Return which build of the open game this is.
+
+        Compared against the build a save recorded, so a player is
+        cautioned when a save predates a rebuild rather than losing it.
+        """
+        if self.session is None:
+            return ""
+        return game_build(self.session.game_dir)
+
+    def _game_id(self) -> str:
+        """Return the open game's identity, as the library's partition key.
+
+        Raises:
+            ValueError: No game is currently open.
+        """
+        if self.session is None:
+            raise ValueError("_game_id() called with no open session")
+        return game_identity(self.session.game_dir)
 
     def _snapshot_state(self) -> dict[str, Any]:
         """Compose the live session's full persistable state dict.
@@ -175,6 +223,11 @@ class SaveSlotsAPI:
                 strict_externals=is_strict_externals(settings),
                 mount=mount,
             )
+        except session_state.SaveFormatError as error:
+            # Returning here leaves the live session and the save file as
+            # they were -- _write_save() below would otherwise overwrite
+            # the save with a session that never loaded.
+            return {"error": str(error)}
         except UnboundExternalError as error:
             return {"error": f"Unbound EXTERNAL: {error}"}
         self._write_save()
@@ -186,12 +239,20 @@ class SaveSlotsAPI:
         """List every named save slot for the current game.
 
         Returns:
-            `{"slots": [...]}` (see `save_slots.list_slots()`), or
+            `{"slots": [...]}` (see `game_saves.list_game_saves()`), or
             `{"slots": []}` if no game is open.
         """
         if self.session is None:
             return {"slots": []}
-        return {"slots": list_slots(self._saves_dir(), self.session.game_dir)}
+        current_build = self._game_build()
+        slots = list_game_saves(
+            self._game_id(),
+            saves_in=self._game_saves_directory(),
+            maximum_gamesave_slots=MAX_SAVE_SLOTS,
+        )
+        for entry in slots:
+            entry["other_build"] = entry["used"] and is_from_another_build(entry, current_build)
+        return {"slots": slots}
 
     def save_to_slot(self, slot: int, label: str) -> dict[str, Any]:
         """Snapshot the live session into one named save slot.
@@ -207,8 +268,17 @@ class SaveSlotsAPI:
         if self.session is None:
             return {"error": "No game is open"}
         try:
-            save_slot(self._saves_dir(), self.session.game_dir, slot, self._snapshot_state(), label)
-        except SaveSlotError as error:
+            save_game(
+                self._game_id(),
+                slot,
+                self._snapshot_state(),
+                label,
+                saves_in=self._game_saves_directory(),
+                maximum_gamesave_slots=MAX_SAVE_SLOTS,
+                saved_at=_now(),
+                game_build=self._game_build(),
+            )
+        except GameSaveError as error:
             return {"error": str(error)}
         return {"saved": True}
 
@@ -229,8 +299,13 @@ class SaveSlotsAPI:
         if self.session is None:
             return {"error": "No game is open"}
         try:
-            saved_state = load_slot(self._saves_dir(), self.session.game_dir, slot)
-        except SaveSlotError as error:
+            saved_state = load_game_save(
+                self._game_id(),
+                slot,
+                saves_in=self._game_saves_directory(),
+                maximum_gamesave_slots=MAX_SAVE_SLOTS,
+            )
+        except (GameSaveError, session_state.SaveFormatError) as error:
             return {"error": str(error)}
         return self._resume_from_state(saved_state)
 
@@ -249,8 +324,13 @@ class SaveSlotsAPI:
         if self.session is None:
             return {"error": "No game is open"}
         try:
-            delete_slot(self._saves_dir(), self.session.game_dir, slot)
-        except SaveSlotError as error:
+            delete_game_save(
+                self._game_id(),
+                slot,
+                saves_in=self._game_saves_directory(),
+                maximum_gamesave_slots=MAX_SAVE_SLOTS,
+            )
+        except GameSaveError as error:
             return {"error": str(error)}
         return {"deleted": True}
 
@@ -272,8 +352,13 @@ class SaveSlotsAPI:
         if self.session is None:
             return {"error": "No game is open"}
         try:
-            envelope = export_slot(self._saves_dir(), self.session.game_dir, slot)
-        except SaveSlotError as error:
+            envelope = export_game_save(
+                self._game_id(),
+                slot,
+                saves_in=self._game_saves_directory(),
+                maximum_gamesave_slots=MAX_SAVE_SLOTS,
+            )
+        except GameSaveError as error:
             return {"error": str(error)}
         target = Path(destination)
         if target.is_dir():
@@ -295,7 +380,7 @@ class SaveSlotsAPI:
         Returns:
             `{"imported": True}`, or `{"error": ...}` if no game is
             open, the file cannot be read/parsed, or it does not match
-            this game (see `save_slots.import_slot()`).
+            this game (see `game_saves.import_game_save()`).
         """
         if self.session is None:
             return {"error": "No game is open"}
@@ -304,10 +389,19 @@ class SaveSlotsAPI:
         except (OSError, json.JSONDecodeError, UnicodeDecodeError) as error:
             return {"error": f"Could not read save file: {error}"}
         try:
-            import_slot(self._saves_dir(), self.session.game_dir, slot, envelope)
-        except SaveSlotError as error:
+            written = import_game_save(
+                self._game_id(),
+                slot,
+                envelope,
+                saves_in=self._game_saves_directory(),
+                maximum_gamesave_slots=MAX_SAVE_SLOTS,
+                saved_at=_now(),
+            )
+        except GameSaveError as error:
             return {"error": str(error)}
-        return {"imported": True}
+        # Importing only copies the file in; whether it plays is settled
+        # at load. The shell cautions there too, off the slot listing.
+        return {"imported": True, "other_build": is_from_another_build(written, self._game_build())}
 
     def pick_save_destination(self, suggested_filename: str) -> str | None:
         """Show a native save-file dialog and return the chosen path.
@@ -343,10 +437,8 @@ class SaveSlotsAPI:
     # One dedicated slot, saved/loaded instantly with no label prompt,
     # bound to F5/F9 by the shell's own app.js. Built on the exact same
     # snapshot-copy semantics as the named slots above (quicksaving never
-    # touches slots 0-4, quickloading never mutates the quicksave file
-    # itself), just addressed by its own reserved path
-    # (`_quicksave_path()`) instead of `save_slots.py`'s range-checked
-    # slot functions.
+    # touches slots 0-4, quickloading never mutates the quicksave itself),
+    # addressed by the library's own reserved slot number.
 
     def quicksave(self) -> dict[str, Any]:
         """Instantly snapshot the live session into the one quicksave slot.
@@ -356,32 +448,37 @@ class SaveSlotsAPI:
         """
         if self.session is None:
             return {"error": "No game is open"}
-        path = self._quicksave_path(self.session.game_dir)
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(json.dumps({"label": QUICKSAVE_LABEL, "state": self._snapshot_state()}), encoding="utf-8")
+        try:
+            library_quicksave(
+                self._game_id(), self._snapshot_state(), saves_in=self._game_saves_directory(),
+                saved_at=_now(), game_build=self._game_build(),
+            )
+        except GameSaveError as error:
+            return {"error": str(error)}
         return {"saved": True}
 
     def quickload(self) -> dict[str, Any]:
         """Instantly restore the live session from the one quicksave slot.
 
         Returns:
-            `{"error": ...}` if no game is open or no quicksave exists,
-            otherwise a turn context dict for the resumed turn.
+            `{"error": ...}` if no game is open, no quicksave exists, or
+            the quicksave cannot be read, otherwise a turn context dict
+            for the resumed turn.
         """
         if self.session is None:
             return {"error": "No game is open"}
-        path = self._quicksave_path(self.session.game_dir)
-        if not path.is_file():
-            return {"error": "No quicksave exists"}
-        envelope = json.loads(path.read_text(encoding="utf-8"))
-        return self._resume_from_state(envelope["state"])
+        try:
+            saved_state = library_quickload(self._game_id(), saves_in=self._game_saves_directory())
+        except (GameSaveError, session_state.SaveFormatError) as error:
+            return {"error": str(error)}
+        return self._resume_from_state(saved_state)
 
     def has_quicksave(self) -> bool:
         """Return whether the current game has a quicksave to load.
 
         Returns:
-            False if no game is open or no quicksave file exists yet.
+            False if no game is open or no quicksave exists yet.
         """
         if self.session is None:
             return False
-        return self._quicksave_path(self.session.game_dir).is_file()
+        return library_has_quicksave(self._game_id(), saves_in=self._game_saves_directory())

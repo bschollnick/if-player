@@ -357,6 +357,34 @@ class TrustTests(PlayerAPITestCase):
         context = self.api.open_game(str(SIMPLE_GAME))
         self.assertFalse(context["needs_trust"])
 
+    def _game_needing_plugins(self, screen: str | None = None) -> Path:
+        """A game folder declaring a plugin, so opening it prompts."""
+        game = self.tmp / "needs_plugins"
+        game.mkdir()
+        manifest = ["MAIN_STORY_FILE: story.inkj", "REQUIRED_PLUGINS:", "  - some_plugin"]
+        if screen is not None:
+            manifest.append("PLUGIN_DENIED_SCREEN: denied.md")
+            (game / "denied.md").write_text(screen, encoding="utf-8")
+        (game / "manifest.yaml").write_text("\n".join(manifest) + "\n", encoding="utf-8")
+        (game / "__init__.py").write_text("", encoding="utf-8")
+        (game / "story.inkj").write_text((SIMPLE_GAME / "story.inkj").read_text(encoding="utf-8"), encoding="utf-8")
+        return game
+
+    def test_the_prompt_carries_the_games_own_explanation(self):
+        """A game that declares plugins is designed around them. It says
+        what they do, because only it knows."""
+        game = self._game_needing_plugins("## Why\n\nWithout `some_plugin` nothing works.")
+        context = self.api.open_game(str(game))
+        self.assertTrue(context["needs_trust"])
+        self.assertIn("nothing works", context["plugin_denied_text"])
+        self.assertEqual(context["required_plugins"], ["some_plugin"])
+
+    def test_a_game_shipping_no_screen_still_gets_one(self):
+        """The host lists what it can rather than prompting with nothing."""
+        context = self.api.open_game(str(self._game_needing_plugins()))
+        self.assertTrue(context["needs_trust"])
+        self.assertIn("some_plugin", context["plugin_denied_text"])
+
 
 class ReaderPrefsAPITests(PlayerAPITestCase):
     def test_defaults_are_medium(self):

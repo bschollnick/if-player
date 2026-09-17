@@ -20,7 +20,7 @@
   function bindElements() {
     [
       "library-view", "open-bundle-button", "open-folder-button", "library-error",
-      "trust-prompt", "trust-folder-name", "trust-decline", "trust-accept",
+      "trust-prompt", "trust-folder-name", "trust-plugin-detail", "trust-decline", "trust-accept",
       "play-view", "sidebar", "back-to-library", "undo-button", "restart-button",
       "saves-button", "save-status", "settings-button",
       "story-column", "story-title", "centre-header", "centre-footer",
@@ -154,7 +154,7 @@
         return;
       }
       if (context.needs_trust) {
-        showTrustPrompt(gameDir);
+        showTrustPrompt(gameDir, context);
         return;
       }
       state.playLayout = context.play_layout || "classic";
@@ -168,10 +168,15 @@
 
   // -- Trust prompt -----------------------------------------------------
 
-  function showTrustPrompt(gameDir) {
+  function showTrustPrompt(gameDir, context) {
     els.libraryView.hidden = true;
     els.playView.hidden = true;
     els.trustFolderName.textContent = gameDir;
+    // textContent, not innerHTML: this is the game's own text and the
+    // game is precisely what has not been trusted yet.
+    var detail = (context && context.plugin_denied_text) || "";
+    els.trustPluginDetail.textContent = detail;
+    els.trustPluginDetail.hidden = !detail;
     els.trustPrompt.hidden = false;
   }
 
@@ -359,10 +364,16 @@
   var saveStatusTimer = null;
 
   function showSaveStatus(message) {
-    els.saveStatus.textContent = message;
-    els.saveStatus.hidden = false;
+    // The saves modal covers the sidebar, so a message raised from inside
+    // it has to appear inside it or nobody sees it.
+    var modal = document.getElementById("saves-modal");
+    var target = (modal && !modal.hidden)
+      ? document.getElementById("saves-modal-status")
+      : els.saveStatus;
+    target.textContent = message;
+    target.hidden = false;
     if (saveStatusTimer) clearTimeout(saveStatusTimer);
-    saveStatusTimer = setTimeout(function () { els.saveStatus.hidden = true; }, 2500);
+    saveStatusTimer = setTimeout(function () { target.hidden = true; }, 4000);
   }
 
   function quicksave() {
@@ -404,6 +415,14 @@
     });
   }
 
+  // Shown when a save was made by a different build of the game. The
+  // save usually still plays: the story may simply have moved on under
+  // it, so this cautions rather than refuses.
+  var OTHER_BUILD_CAUTION =
+    "Caution: This is a save file from a different version of the game. " +
+    "You may still be able to use it, but if you see any errors, please " +
+    "restart the game or use a different save file.";
+
   function renderSaveSlotRow(slot) {
     var row = document.createElement("li");
     row.className = "save-slot-row";
@@ -412,41 +431,50 @@
     info.className = "save-slot-info";
     var labelLine = document.createElement("div");
     labelLine.className = "slot-label";
-    labelLine.textContent = slot.used ? (slot.label || "Slot " + (slot.slot + 1)) : "Slot " + (slot.slot + 1) + " (empty)";
+    labelLine.textContent = slot.used ? (slot.label || "Slot " + (slot.gamesave_slot + 1)) : "Slot " + (slot.gamesave_slot + 1) + " (empty)";
     info.appendChild(labelLine);
     if (slot.used) {
       var metaLine = document.createElement("div");
       metaLine.className = "slot-meta";
       metaLine.textContent = "Turn " + slot.turn_count;
+      if (slot.other_build) {
+        var mark = document.createElement("span");
+        mark.className = "slot-other-build";
+        mark.textContent = " \u26a0 different version";
+        metaLine.appendChild(mark);
+      }
       info.appendChild(metaLine);
     }
     row.appendChild(info);
 
     var saveButton = document.createElement("button");
     saveButton.textContent = "Save";
-    saveButton.addEventListener("click", function () { saveToSlotPrompted(slot.slot); });
+    saveButton.addEventListener("click", function () { saveToSlotPrompted(slot.gamesave_slot); });
     row.appendChild(saveButton);
 
     if (slot.used) {
       var loadButton = document.createElement("button");
       loadButton.textContent = "Load";
-      loadButton.addEventListener("click", function () { loadFromSlot(slot.slot); });
+      loadButton.addEventListener("click", function () {
+        if (slot.other_build && !confirm(OTHER_BUILD_CAUTION)) return;
+        loadFromSlot(slot.gamesave_slot);
+      });
       row.appendChild(loadButton);
 
       var exportButton = document.createElement("button");
       exportButton.textContent = "Export";
-      exportButton.addEventListener("click", function () { exportSlot(slot.slot); });
+      exportButton.addEventListener("click", function () { exportSlot(slot.gamesave_slot); });
       row.appendChild(exportButton);
 
       var deleteButton = document.createElement("button");
       deleteButton.textContent = "Delete";
-      deleteButton.addEventListener("click", function () { deleteSlotConfirmed(slot.slot); });
+      deleteButton.addEventListener("click", function () { deleteSlotConfirmed(slot.gamesave_slot); });
       row.appendChild(deleteButton);
     }
 
     var importButton = document.createElement("button");
     importButton.textContent = "Import";
-    importButton.addEventListener("click", function () { importIntoSlot(slot.slot); });
+    importButton.addEventListener("click", function () { importIntoSlot(slot.gamesave_slot); });
     row.appendChild(importButton);
 
     return row;
@@ -490,6 +518,7 @@
       if (!source) return;
       api().import_save(slot, source).then(function (result) {
         if (result.error) { showSaveStatus(result.error); return; }
+        if (result.other_build) showSaveStatus(OTHER_BUILD_CAUTION);
         refreshSavesList();
       });
     });

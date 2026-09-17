@@ -113,7 +113,22 @@ code {
   border: 1px solid var(--border);
   border-radius: 10px;
   padding: 2em;
-  max-width: 32em;
+  max-width: 40em;
+}
+
+/* The game's own explanation. Rendered as preformatted text, never as
+   markup -- it comes from a folder that has not been trusted yet. */
+.trust-detail {
+  background: var(--bg-alt, rgba(127, 127, 127, 0.08));
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 1em;
+  margin: 1em 0;
+  max-height: 22em;
+  overflow-y: auto;
+  white-space: pre-wrap;
+  font-size: 0.85em;
+  line-height: 1.45;
 }
 
 .trust-buttons {
@@ -348,6 +363,20 @@ body.layout-three_column #story-column { max-width: none; }
   font-size: 0.8em;
   color: var(--muted);
   margin: 0.25em 0 0;
+}
+
+.slot-other-build {
+  color: #b8860b;
+  font-weight: 600;
+}
+
+.saves-modal-status {
+  margin: 0.75em 0 0;
+  padding: 0.6em 0.8em;
+  border-radius: 4px;
+  background: rgba(220, 53, 69, 0.12);
+  border: 1px solid rgba(220, 53, 69, 0.45);
+  font-size: 0.9em;
 }
 
 /* -- Save-slot manager modal -------------------------------------------- */

@@ -35,9 +35,13 @@
     <p>The folder <code id="trust-folder-name"></code> declares plugins it
        needs active. Plugins are real Python code the game folder ships --
        trusting this folder lets that code run.</p>
+    <!-- The game's own account of what its plugins do. Rendered as text,
+         never as markup: it comes from a folder that has not been
+         trusted yet. -->
+    <pre id="trust-plugin-detail" class="trust-detail" hidden></pre>
     <p>Only trust folders you downloaded from a source you trust.</p>
     <div class="trust-buttons">
-      <button id="trust-decline" type="button" class="button-ghost">Play Without Trusting</button>
+      <button id="trust-decline" type="button" class="button-ghost">Not Now</button>
       <button id="trust-accept" type="button" class="button-primary">Trust This Folder</button>
     </div>
   </div>
@@ -102,6 +106,9 @@
       <button id="saves-close" type="button" class="button-ghost" title="Close">&times;</button>
     </div>
     <ul id="saves-list" class="saves-list"></ul>
+    <!-- The sidebar's own #save-status sits behind this modal, so a
+         refused import or export would be invisible while it is open. -->
+    <p id="saves-modal-status" class="saves-modal-status" hidden></p>
     <p class="hint">Quicksave/Quickload: <kbd>F5</kbd> / <kbd>F9</kbd></p>
   </div>
 </div>

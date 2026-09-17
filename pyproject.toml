@@ -1,6 +1,6 @@
 [project]
 name = "if-player"
-version = "0.1.0"
+version = "0.8.0"
 description = "A standalone, native desktop Ink interactive-fiction player -- a thin pywebview shell over ink_engine"
 readme = "README.md"
 authors = [
@@ -14,7 +14,7 @@ classifiers = [
 ]
 dependencies = [
     "pywebview (>=6.2.1,<7.0.0)",
-    "ink-engine",
+    "ink-engine (>=0.9.0,<0.10.0)",
     "pyyaml (>=6.0.3,<7.0.0)",
 ]
 

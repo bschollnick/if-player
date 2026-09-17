@@ -6,6 +6,7 @@ PlayerAPI.pick_game_folder()."""
 
 from __future__ import annotations
 
+import json
 import shutil
 import tempfile
 from pathlib import Path
@@ -31,6 +32,22 @@ class ListSavesTests(SaveSlotsAPITestCase):
         result = self.api.list_saves()
         self.assertEqual(len(result["slots"]), 5)
         self.assertTrue(all(not s["used"] for s in result["slots"]))
+
+    def test_each_slot_entry_carries_the_keys_the_shell_reads(self):
+        """app.js addresses every button by these keys.
+
+        A renamed key is invisible to Python: the shell reads
+        `slot.gamesave_slot`, and a miss yields `undefined`, so every
+        button silently passes the wrong slot and empty rows render as
+        "Slot NaN". Nothing else in this suite pins the names.
+        """
+        entry = self.api.list_saves()["slots"][0]
+
+        self.assertEqual(
+            sorted(entry.keys()),
+            ["game_build", "gamesave_slot", "label", "other_build", "saved_at", "turn_count", "used"],
+        )
+        self.assertEqual(entry["gamesave_slot"], 0)
 
     def test_calling_list_saves_before_any_game_is_open_returns_empty(self):
         fresh_api = PlayerAPI(settings_path=self.tmp / "settings2.json")
@@ -111,7 +128,7 @@ class ExportImportSaveTests(SaveSlotsAPITestCase):
         self.assertTrue(export_path.is_file())
 
         import_result = self.api.import_save(4, str(export_path))
-        self.assertEqual(import_result, {"imported": True})
+        self.assertEqual(import_result, {"imported": True, "other_build": False})
 
         context = self.api.load_from_slot(4)
         self.assertIn("You went north.", context["text"])
@@ -152,6 +169,29 @@ class QuicksaveQuickloadTests(SaveSlotsAPITestCase):
     def test_quickloading_with_no_quicksave_returns_an_error(self):
         result = self.api.quickload()
         self.assertIn("error", result)
+
+    def test_quickloading_a_damaged_quicksave_returns_an_error_not_a_crash(self):
+        """A quicksave holding valid JSON but no state must not raise.
+
+        The previous implementation checked the file existed and then
+        indexed `envelope["state"]` bare, so a truncated write, a
+        hand-edited file, or an unrelated .json raised KeyError straight
+        out of a layer documented as never raising.
+        """
+        self.api.quicksave()
+        quicksave_file = next(self.tmp.rglob("quicksave.json"))
+        quicksave_file.write_text(json.dumps({"label": "Quicksave"}), encoding="utf-8")
+
+        result = self.api.quickload()
+
+        self.assertIn("error", result)
+
+    def test_quickloading_unparseable_json_returns_an_error_not_a_crash(self):
+        self.api.quicksave()
+        quicksave_file = next(self.tmp.rglob("quicksave.json"))
+        quicksave_file.write_text("{not json", encoding="utf-8")
+
+        self.assertIn("error", self.api.quickload())
 
     def test_quicksaving_never_touches_the_five_named_slots(self):
         self.api.quicksave()

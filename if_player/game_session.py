@@ -31,8 +31,10 @@ from ink_engine.game_folder import (
     find_main_story_file,
 )
 from ink_engine.game_source import GameSource, as_source
-from ink_engine.media_resolver import FilesystemMediaResolver, parse_media_tags
+from ink_engine.media_resolver import FilesystemMediaResolver
 from ink_engine.plugin import Plugin
+
+from if_session import session_state
 
 #: The module a game ships when its media tags are not plain paths --
 #: a converted game whose tags name a character key, say. Absent for a
@@ -226,19 +228,21 @@ def load_game_state(
 
     Returns:
         The rebuilt `InkRuntimeState`.
+
+    Raises:
+        session_state.SaveFormatError: `saved` is from a newer format than
+            this player reads. `from_dict()` reads every field with a
+            default, so an unrecognised envelope would otherwise load as
+            defaulted data rather than an error.
     """
-    return InkRuntimeState.from_dict(root, saved, list_defs, engine_bindings=engine_bindings, strict_externals=strict_externals)
+    checked = session_state.read_saved_state(saved)
+    return InkRuntimeState.from_dict(root, checked, list_defs, engine_bindings=engine_bindings, strict_externals=strict_externals)
 
 
 def build_saved_state(
     state: InkRuntimeState, previous_state: dict[str, Any] | None, transcript: list[dict[str, object]], engine_state: dict[str, Any]
 ) -> dict[str, Any]:
     """Compose one session's full persistable state dict.
-
-    `InkRuntimeState.to_dict()`'s own fields, plus three bookkeeping
-    keys layered on top. This dict IS the save-file format:
-    `InkRuntimeState.from_dict()` ignores keys it doesn't recognise, so
-    the composition round-trips cleanly.
 
     Args:
         state: The current `InkRuntimeState`.
@@ -250,11 +254,7 @@ def build_saved_state(
     Returns:
         The full dict to write to the save file.
     """
-    data = state.to_dict()
-    data["transcript"] = transcript
-    data["previous_state"] = previous_state
-    data["engine_state"] = engine_state
-    return data
+    return session_state.build_saved_state(state, previous_state, transcript, engine_state)
 
 
 def append_transcript_entry(transcript: list[dict[str, object]], text: str, chosen_label: str | None) -> list[dict[str, object]]:
@@ -271,10 +271,7 @@ def append_transcript_entry(transcript: list[dict[str, object]], text: str, chos
         A new transcript list with the entry appended, trimmed to the
         cap by dropping the OLDEST entries first.
     """
-    updated: list[dict[str, object]] = [*transcript, {"text": text, "chosen_label": chosen_label}]
-    if len(updated) > MAX_TRANSCRIPT_TURNS:
-        updated = updated[-MAX_TRANSCRIPT_TURNS:]
-    return updated
+    return session_state.append_transcript_entry(transcript, text, chosen_label, cap=MAX_TRANSCRIPT_TURNS)
 
 
 def open_game(
@@ -541,20 +538,13 @@ def turn_context(session: GameSession) -> dict[str, Any]:
         filesystem path strings; turning these into `file://` URIs is
         `player_api.py`'s own job.
     """
-    state = session.state
     resolver = FilesystemMediaResolver(
         session.source if session.source is not None else session.game_dir,
         resolver_module=game_resolver_module(session),
     )
-    return {
-        "text": state.last_turn_text,
-        "choices": [
-            {"index": index, "text": choice.text, "image_urls": resolver.resolve(parse_media_tags(choice.tags))}
-            for index, choice in enumerate(state.current_choices)
-        ],
-        "done": state.done and not state.current_choices,
-        "turn_count": state.turn_count,
-        "image_urls": resolver.resolve(parse_media_tags(state.current_tags)),
-        "transcript": session.transcript,
-        "can_undo": session.previous_state is not None,
-    }
+    return session_state.turn_context(
+        session.state,
+        resolver=resolver,
+        transcript=session.transcript,
+        can_undo=session.previous_state is not None,
+    )

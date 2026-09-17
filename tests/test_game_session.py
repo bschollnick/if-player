@@ -5,6 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 from unittest import TestCase
 
+from if_session.session_state import SAVE_FORMAT_VERSION, SaveFormatError
 from ink_engine.game_folder import GameFolderError
 from ink_engine.plugin import Plugin
 
@@ -43,6 +44,26 @@ class OpenGameTests(TestCase):
         self.assertEqual(resumed.state.turn_count, original.state.turn_count)
         self.assertEqual(resumed.state.last_turn_text, original.state.last_turn_text)
         self.assertEqual(len(resumed.state.current_choices), len(original.state.current_choices))
+
+    def test_resuming_from_a_newer_save_format_is_refused(self):
+        """`from_dict()` reads every field with a default, so an
+        unrecognised envelope would otherwise load as defaulted data
+        rather than an error."""
+        original = open_game(SIMPLE_GAME, saved_state=None, plugins={}, active_plugin_names=[], trusted=False)
+        saved = build_saved_state(original.state, original.previous_state, original.transcript, original.engine_state)
+        saved["save_format_version"] = SAVE_FORMAT_VERSION + 1
+
+        with self.assertRaises(SaveFormatError) as caught:
+            open_game(SIMPLE_GAME, saved_state=saved, plugins={}, active_plugin_names=[], trusted=False)
+        self.assertIn("newer version", str(caught.exception))
+
+    def test_a_save_written_before_versioning_still_resumes(self):
+        original = open_game(SIMPLE_GAME, saved_state=None, plugins={}, active_plugin_names=[], trusted=False)
+        saved = build_saved_state(original.state, original.previous_state, original.transcript, original.engine_state)
+        del saved["save_format_version"]
+
+        resumed = open_game(SIMPLE_GAME, saved_state=saved, plugins={}, active_plugin_names=[], trusted=False)
+        self.assertEqual(resumed.state.turn_count, original.state.turn_count)
 
     def test_a_missing_compiled_story_raises(self):
         empty_dir = FIXTURES / "no_such_game"
