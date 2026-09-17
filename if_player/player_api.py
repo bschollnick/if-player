@@ -239,7 +239,8 @@ class PlayerAPI(SaveSlotsAPI):
                 "needs_trust": True,
                 # The game's own account of what its plugins do and why
                 # they need permission -- only it knows that
-                # `asfa_occupancy` missing means no character is anywhere.
+                # A game's own occupancy plugin missing means no
+                # character is anywhere.
                 # A game shipping none gets a listing of the names.
                 "plugin_denied_text": plugin_denied_text(source),
                 "required_plugins": list(required_plugins),

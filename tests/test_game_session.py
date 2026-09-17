@@ -343,7 +343,8 @@ class ActivePluginNamesSurviveRebindingTests(TestCase):
             init_state=lambda config: {},
             bind=lambda own_state, engine_state, list_defs: {"where_is_now": lambda: "generic"},
         )
-        # Same slot, different plugin name -- exactly ASFA's arrangement.
+        # Same slot, different plugin name -- the arrangement a game
+        # uses when it extends an engine plugin under its own name.
         game = Plugin(
             name=self.GAME_NAME,
             display_name="Game occupancy",
