@@ -12,10 +12,12 @@ from __future__ import annotations
 import copy
 import importlib
 import json
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any
 
+from if_session import session_state
 from ink_engine.binding import check_required_plugins, resolve_bindings
 from ink_engine.bundle_integrity import verify_bundle
 from ink_engine.discovery import MountedGame
@@ -33,8 +35,6 @@ from ink_engine.game_folder import (
 from ink_engine.game_source import GameSource, as_source
 from ink_engine.media_resolver import FilesystemMediaResolver
 from ink_engine.plugin import Plugin
-
-from if_session import session_state
 
 #: The module a game ships when its media tags are not plain paths --
 #: a converted game whose tags name a character key, say. Absent for a
@@ -246,8 +246,9 @@ def build_saved_state(
 
     Args:
         state: The current `InkRuntimeState`.
-        previous_state: The one-level undo target (this same shape,
-            recursively nested), or None.
+        previous_state: The prior state to undo to -- this same shape,
+            carrying its own `previous_state`, so the chain reaches back
+            to the first turn and nothing prunes it. Or None.
         transcript: The rolling turn history.
         engine_state: This session's own per-plugin state dict.
 

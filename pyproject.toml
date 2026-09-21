@@ -14,7 +14,7 @@ classifiers = [
 ]
 dependencies = [
     "pywebview (>=6.2.1,<7.0.0)",
-    "ink-engine (>=0.9.0,<0.10.0)",
+    "ink-engine (>=1.0.0,<2.0.0)",
     "pyyaml (>=6.0.3,<7.0.0)",
 ]
 
@@ -39,7 +39,8 @@ dev = [
     "black (>=26,<27)",
     "isort (>=6.0.0)",
     "pylint (>=4.0.5,<5.0.0)",
-    "types-pyyaml (>=6.0.12.20260906,<7.0.0.0)"
+    "types-pyyaml (>=6.0.12.20260906,<7.0.0.0)",
+    "ruff (>=0.16.8,<0.17.0)"
 ]
 
 [tool.black]
@@ -47,6 +48,9 @@ line-length = 150
 
 [tool.isort]
 profile = "black"
+# Keep aliased names in the same parenthesised import, which is what
+# ruff's isort rules expect; without it the two disagree forever.
+combine_as_imports = true
 src_paths = ["if_player", "tests"]
 skip_gitignore = true
 
@@ -62,6 +66,19 @@ mypy_path = "."
 max-line-length = 150
 # No pylint_django / django-settings-module / mypy_django_plugin here --
 # this project has no Django dependency, matching ink_engine's own posture.
+
+
+[tool.ruff]
+line-length = 150
+
+[tool.ruff.lint]
+# Errors, modernisation and correctness families. E501 is black's job and
+# W is pycodestyle style, so neither is selected.
+select = ["E4", "E7", "E9", "F", "UP", "RUF", "B", "SIM", "PYI", "BLE", "S", "FURB"]
+
+[tool.ruff.lint.per-file-ignores]
+# S101: `assert` is how a test asserts.
+"tests/*" = ["S101"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

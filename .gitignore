@@ -11,3 +11,4 @@ build/
 .DS_Store
 claude_docs/
 CLAUDE.md
+poetry.lock

@@ -108,6 +108,108 @@ code {
   z-index: 10;
 }
 
+/* A game's own opening questions, laid out like the trust prompt: the
+   same full-window overlay, since both stand between the library and
+   the first turn. */
+#creation-prompt {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 10;
+}
+
+.creation-box {
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 1.5em 2em;
+  max-width: 44em;
+  max-height: 84vh;
+  /* A game may ask a dozen questions. Only the questions scroll: the
+     Start button stays put, so it is never something to hunt for. */
+  display: flex;
+  flex-direction: column;
+}
+
+.creation-fields {
+  overflow-y: auto;
+  min-height: 0;
+}
+
+.creation-field {
+  margin: 0.55em 0;
+}
+
+/* A checkbox is one line of content; it does not need a full row's
+   breathing room above and below. */
+.creation-field-inline {
+  margin: 0.2em 0;
+}
+
+/* A checkbox sits beside its own question rather than under it. */
+.creation-field-inline .creation-label {
+  display: flex;
+  align-items: center;
+  gap: 0.5em;
+}
+
+.creation-label {
+  display: block;
+  margin-bottom: 0.25em;
+  font-weight: 600;
+}
+
+.creation-field input[type="text"] {
+  width: 100%;
+  padding: 0.45em 0.6em;
+}
+
+.creation-choices {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.8em;
+}
+
+.creation-choice {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.2em;
+  padding: 0.35em;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  cursor: pointer;
+}
+
+.creation-choice-image {
+  max-width: 7em;
+  max-height: 9em;
+  object-fit: contain;
+  /* TODO: a plate is a workaround, not a design -- the art still reads
+     as a foreign rectangle on the page. Better options, unexplored:
+     `filter: invert(1)` in the light theme so white line-work becomes
+     black on the page itself with no plate; or re-export the game's own
+     art (two-colour palette PNGs) so it works on any background.
+
+     Why the plate is here: a game's option art is commonly white
+     line-work on transparency, drawn for a light page -- measured, every
+     opaque pixel of the shipped art is white. On this shell's own white
+     background that is invisible, which is how it shipped. */
+  background: #6b6b70;
+  border-radius: 6px;
+  padding: 0.25em;
+}
+
+.creation-buttons {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.6em;
+  margin-top: 1em;
+}
+
 .trust-box {
   background: var(--bg);
   border: 1px solid var(--border);
@@ -185,6 +287,20 @@ body.layout-three_column #play-view {
 body.layout-three_column #story-column { max-width: none; }
 
 #story-title { margin-top: 0; }
+
+/* An advisory line: the game declared something, the player should know.
+   Deliberately not styled as a warning -- it reports a fact, and nothing
+   here has verified or blocked anything. */
+.notice {
+  margin: 0 0 1em;
+  padding: 0.6em 0.8em;
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--muted);
+  border-radius: 3px;
+  background: var(--panel-bg);
+  color: var(--muted);
+  font-size: 0.9em;
+}
 
 .centre-stats {
   display: flex;

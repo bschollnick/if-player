@@ -17,30 +17,30 @@ be used standalone.
 from __future__ import annotations
 
 import json
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
 import webview
 from if_session import session_state
-from if_session.game_saves import (
-    GameSavesDirectory,
-    GameSaveError,
-    delete_game_save,
-    export_game_save,
-    import_game_save,
-    is_from_another_build,
-    list_game_saves,
-    load_game_save,
-    save_game,
-)
 
 # Aliased because the js_api methods below share these three names.
 # Python would resolve the bare names correctly -- a method body reads
 # module globals, not the class namespace -- but it reads as recursion.
-from if_session.game_saves import has_quicksave as library_has_quicksave
-from if_session.game_saves import quickload as library_quickload
-from if_session.game_saves import quicksave as library_quicksave
+from if_session.game_saves import (
+    GameSaveError,
+    GameSavesDirectory,
+    delete_game_save,
+    export_game_save,
+    has_quicksave as library_has_quicksave,
+    import_game_save,
+    is_from_another_build,
+    list_game_saves,
+    load_game_save,
+    quickload as library_quickload,
+    quicksave as library_quicksave,
+    save_game,
+)
 from ink_engine.engine import UnboundExternalError
 from ink_engine.game_folder import read_required_plugins
 from ink_engine.game_source import game_build, game_identity
@@ -89,7 +89,7 @@ def _now() -> str:
 
     The library never reads a clock, so the application supplies one.
     """
-    return datetime.now(timezone.utc).isoformat()
+    return datetime.now(UTC).isoformat()
 
 
 def _default_export_directory() -> str:
@@ -450,8 +450,11 @@ class SaveSlotsAPI:
             return {"error": "No game is open"}
         try:
             library_quicksave(
-                self._game_id(), self._snapshot_state(), saves_in=self._game_saves_directory(),
-                saved_at=_now(), game_build=self._game_build(),
+                self._game_id(),
+                self._snapshot_state(),
+                saves_in=self._game_saves_directory(),
+                saved_at=_now(),
+                game_build=self._game_build(),
             )
         except GameSaveError as error:
             return {"error": str(error)}

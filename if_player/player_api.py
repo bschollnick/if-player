@@ -11,20 +11,31 @@ tested with no window and no filesystem-dialog surface.
 
 from __future__ import annotations
 
+import base64
 import json
+import mimetypes
 import re
 from pathlib import Path
 from typing import Any
 
 import webview
 from if_session import session_state
+from if_session.character_creation import answers_to_globals
 from ink_engine.discovery import mount_game
-from ink_engine.engine import UnboundExternalError
+from ink_engine.engine import (
+    InkRuntimeState,
+    UnboundExternalError,
+    load_list_defs,
+    load_story_root,
+)
 from ink_engine.game_folder import (
     GameFolderError,
     plugin_denied_text,
+    read_manifest,
+    read_new_game_fields,
     read_play_layout,
     read_required_plugins,
+    read_uses_network_resources,
 )
 from ink_engine.game_source import GameSourceError, game_identity, open_game_source
 from ink_engine.media_resolver import find_cover_image, find_prose_styles
@@ -63,6 +74,60 @@ def _to_file_uri(path_str: str) -> str:
     if _URI_SCHEME.match(path_str):
         return path_str
     return Path(path_str).as_uri()
+
+
+#: Where a bundler places character-creation images. A game FOLDER keeps
+#: them at its root, so both layouts are searched rather than either
+#: being assumed -- the same pair `bundle_media` looks in.
+_NEW_GAME_IMAGE_DIRECTORY = "UI"
+
+
+def _field_image_uri(source: Any, filename: str) -> str | None:
+    """Return something an `<img>` can load for one option's picture.
+
+    A bundled game has no filesystem path for its members, so the bytes
+    become a `data:` URI. A game folder answers with a real path.
+
+    Args:
+        source: The game's own source.
+        filename: The bare filename an option declares.
+
+    Returns:
+        A loadable URI, or None when the game ships no such image.
+    """
+    for candidate in (filename, f"{_NEW_GAME_IMAGE_DIRECTORY}/{filename}"):
+        if source.exists(candidate):
+            media_type = mimetypes.guess_type(candidate)[0] or "application/octet-stream"
+            encoded = base64.b64encode(source.read_bytes(candidate)).decode("ascii")
+            return f"data:{media_type};base64,{encoded}"
+    return None
+
+
+def _resolvable_field_images(source: Any, fields: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Return `fields` with every option image resolved to a URI.
+
+    The shell cannot read a file out of a mounted bundle, so each
+    `radio_image` option gains an `image_uri` beside its declared
+    `image`. An image the game does not ship resolves to None and the
+    shell shows the option's label alone.
+
+    Args:
+        source: The game's own source.
+        fields: The manifest's own `NEW_GAME_FIELDS`.
+
+    Returns:
+        A copy; the manifest's own data is not modified.
+    """
+    resolved = []
+    for field in fields:
+        entry = dict(field)
+        if entry.get("type") == "radio_image":
+            entry["options"] = [
+                {**option, "image_uri": _field_image_uri(source, option["image"]) if option.get("image") else None}
+                for option in entry.get("options", [])
+            ]
+        resolved.append(entry)
+    return resolved
 
 
 class PlayerAPI(SaveSlotsAPI):
@@ -226,7 +291,6 @@ class PlayerAPI(SaveSlotsAPI):
         settings = settings_store.load_settings(self.settings_path)
         trusted = settings_store.is_folder_trusted(settings, path)
         reader_prefs = settings_store.get_reader_prefs(settings)
-        strict_externals = settings_store.is_strict_externals(settings)
 
         try:
             source = open_game_source(path)
@@ -246,20 +310,100 @@ class PlayerAPI(SaveSlotsAPI):
                 "required_plugins": list(required_plugins),
                 "play_layout": read_play_layout(source) or DEFAULT_PLAY_LAYOUT,
                 "prose_styles": find_prose_styles(source),
+                "uses_network_resources": read_uses_network_resources(source),
                 "reader_prefs": reader_prefs,
             }
 
-        self._release_mount()
-        mount = mount_game(path) if trusted and source.exists("__init__.py") else None
-        plugins = discover_session_plugins(trusted=trusted, mount=mount)
         saved_state = None
         save_path = self._save_file_path(path)
         if save_path.is_file():
             saved_state = json.loads(save_path.read_text(encoding="utf-8"))
 
+        new_game_fields = read_new_game_fields(source)
+        if new_game_fields and saved_state is None:
+            # Asked once, when a game first starts. A saved game already
+            # carries the answers, so resuming never asks again.
+            return {
+                "needs_character_creation": True,
+                "new_game_fields": _resolvable_field_images(source, new_game_fields),
+                "game_dir": str(path),
+                "play_layout": read_play_layout(source) or DEFAULT_PLAY_LAYOUT,
+                "prose_styles": find_prose_styles(source),
+                "uses_network_resources": read_uses_network_resources(source),
+                "reader_prefs": reader_prefs,
+            }
+
+        return self._open_with_globals(path, source, saved_state, initial_globals=None)
+
+    def start_new_game(self, game_dir: str, answers: dict[str, str]) -> dict[str, Any]:
+        """Start a game with the answers its character-creation form gave.
+
+        Args:
+            game_dir: The game folder's own path.
+            answers: One entry per `NEW_GAME_FIELDS` item, keyed by that
+                field's `var`. A checkbox sends `"on"` or is omitted --
+                the same encoding an HTML form uses, which is what
+                `answers_to_globals()` reads.
+
+        Returns:
+            As `open_game()`, for the game now under way.
+        """
+        path = Path(game_dir)
+        try:
+            source = open_game_source(path)
+        except GameSourceError as error:
+            return {"error": str(error)}
+
+        fields = read_new_game_fields(source)
+        # The story's own declared values, so an `add_to` field adds to
+        # the real base rather than a guess. A bare state runs only the
+        # global-decl container: no bindings, no story advanced.
+        story = json.loads(source.read_text(read_manifest(source)["MAIN_STORY_FILE"]))
+        defaults = InkRuntimeState(load_story_root(story, full_build=False), load_list_defs(story)).globals
+        initial_globals = answers_to_globals(fields, answers, story_defaults=defaults)
+
+        return self._open_with_globals(path, source, None, initial_globals=initial_globals)
+
+    def _open_with_globals(
+        self,
+        path: Path,
+        source: Any,
+        saved_state: dict[str, Any] | None,
+        *,
+        initial_globals: dict[str, Any] | None,
+    ) -> dict[str, Any]:
+        """Open a game, shared by `open_game()` and `start_new_game()`.
+
+        Args:
+            path: The game folder.
+            source: Its already-opened source.
+            saved_state: A save to resume, or None for a fresh game.
+            initial_globals: Variables to set before the opening turn.
+
+        Returns:
+            As `open_game()`.
+        """
+        settings = settings_store.load_settings(self.settings_path)
+        trusted = settings_store.is_folder_trusted(settings, path)
+        reader_prefs = settings_store.get_reader_prefs(settings)
+        strict_externals = settings_store.is_strict_externals(settings)
+        required_plugins = read_required_plugins(source)
+
+        self._release_mount()
+        mount = mount_game(path) if trusted and source.exists("__init__.py") else None
+        plugins = discover_session_plugins(trusted=trusted, mount=mount)
+
         try:
             self.session = game_session.open_game(
-                path, saved_state, plugins, required_plugins, trusted, strict_externals=strict_externals, mount=mount, source=source
+                path,
+                saved_state,
+                plugins,
+                required_plugins,
+                trusted,
+                initial_globals=initial_globals,
+                strict_externals=strict_externals,
+                mount=mount,
+                source=source,
             )
         except GameFolderError as error:
             return {"error": str(error)}
@@ -275,6 +419,7 @@ class PlayerAPI(SaveSlotsAPI):
         context["needs_trust"] = False
         context["play_layout"] = read_play_layout(source) or DEFAULT_PLAY_LAYOUT
         context["prose_styles"] = find_prose_styles(source)
+        context["uses_network_resources"] = read_uses_network_resources(source)
         context["reader_prefs"] = reader_prefs
         return context
 

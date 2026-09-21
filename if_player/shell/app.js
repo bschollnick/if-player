@@ -21,6 +21,7 @@
     [
       "library-view", "open-bundle-button", "open-folder-button", "library-error",
       "trust-prompt", "trust-folder-name", "trust-plugin-detail", "trust-decline", "trust-accept",
+      "creation-prompt", "creation-title", "creation-form", "creation-cancel", "creation-start",
       "play-view", "sidebar", "back-to-library", "undo-button", "restart-button",
       "saves-button", "save-status", "settings-button",
       "story-column", "story-title", "centre-header", "centre-footer",
@@ -30,10 +31,28 @@
       "game-panel", "panel-tabs", "panel-sections", "panel-detail",
       "saves-modal", "saves-close", "saves-list",
       "settings-modal", "settings-close",
-      "game-prose-styles",
+      "game-prose-styles", "network-resources-notice",
     ].forEach(function (id) {
       els[camelCase(id)] = document.getElementById(id);
     });
+  }
+
+
+  // A game's manifest may declare USES_NETWORK_RESOURCES. It is the game's
+  // own statement: nothing here verifies it, and nothing restricts what a
+  // game may load. Absent means no notice.
+  function applyNetworkResourcesNotice(context) {
+    var notice = els.networkResourcesNotice;
+    if (!notice) { return; }
+    if (context && context.uses_network_resources) {
+      notice.textContent =
+        "This game uses resources from the network, such as fonts or images. " +
+        "Playing it will make requests to servers outside your computer.";
+      notice.hidden = false;
+    } else {
+      notice.textContent = "";
+      notice.hidden = true;
+    }
   }
 
   function camelCase(id) {
@@ -118,6 +137,7 @@
   function showLibrary(errorMessage) {
     els.libraryView.hidden = false;
     els.trustPrompt.hidden = true;
+    els.creationPrompt.hidden = true;
     els.playView.hidden = true;
     if (errorMessage) {
       els.libraryError.textContent = errorMessage;
@@ -157,9 +177,126 @@
         showTrustPrompt(gameDir, context);
         return;
       }
+      if (context.needs_character_creation) {
+        showCreationPrompt(gameDir, context);
+        return;
+      }
       state.playLayout = context.play_layout || "classic";
       state.readerPrefs = context.reader_prefs || state.readerPrefs;
       els.gameProseStyles.textContent = context.prose_styles || "";
+      applyNetworkResourcesNotice(context);
+      applyBodyClasses();
+      showPlayView();
+      renderTurn(context);
+    });
+  }
+
+  // -- Character creation ------------------------------------------------
+  //
+  // A game's own opening questions (manifest NEW_GAME_FIELDS). Answers go
+  // back as a flat {var: value} map; a checkbox sends "on" or is omitted,
+  // matching what an HTML form submits, which is the encoding
+  // answers_to_globals() reads.
+
+  function creationFieldRow(field) {
+    var row = document.createElement("div");
+    row.className = "creation-field";
+
+    var label = document.createElement("label");
+    label.className = "creation-label";
+    label.textContent = field.label || field.var;
+    row.appendChild(label);
+
+    if (field.type === "text") {
+      var text = document.createElement("input");
+      text.type = "text";
+      text.name = field.var;
+      text.value = field.default || "";
+      row.appendChild(text);
+    } else if (field.type === "checkbox") {
+      var box = document.createElement("input");
+      box.type = "checkbox";
+      box.name = field.var;
+      box.checked = Boolean(field.default);
+      // The box belongs beside its own question, not under it.
+      label.insertBefore(box, label.firstChild);
+      row.classList.add("creation-field-inline");
+    } else if (field.type === "radio_image") {
+      var choices = document.createElement("div");
+      choices.className = "creation-choices";
+      (field.options || []).forEach(function (option, index) {
+        var choice = document.createElement("label");
+        choice.className = "creation-choice";
+
+        var radio = document.createElement("input");
+        radio.type = "radio";
+        radio.name = field.var;
+        radio.value = String(index);
+        // The engine falls back to the declared default when nothing is
+        // submitted, so pre-selecting the first is presentation only.
+        radio.checked = index === 0;
+        choice.appendChild(radio);
+
+        if (option.image_uri) {
+          var picture = document.createElement("img");
+          picture.className = "creation-choice-image";
+          picture.src = option.image_uri;
+          picture.alt = "";
+          choice.appendChild(picture);
+        }
+
+        var caption = document.createElement("span");
+        caption.textContent = option.label || "";
+        choice.appendChild(caption);
+        choices.appendChild(choice);
+      });
+      row.appendChild(choices);
+    }
+    return row;
+  }
+
+  function showCreationPrompt(gameDir, context) {
+    state.gameDir = gameDir;
+    state.creationFields = context.new_game_fields || [];
+    els.libraryView.hidden = true;
+    els.playView.hidden = true;
+    els.trustPrompt.hidden = true;
+    els.creationForm.innerHTML = "";
+    state.creationFields.forEach(function (field) {
+      els.creationForm.appendChild(creationFieldRow(field));
+    });
+    els.creationPrompt.hidden = false;
+  }
+
+  function collectCreationAnswers() {
+    var answers = {};
+    state.creationFields.forEach(function (field) {
+      var input = els.creationForm.elements[field.var];
+      if (!input) return;
+      if (field.type === "checkbox") {
+        // "on" or absent -- never "true"/"false", which resolve False.
+        if (input.checked) answers[field.var] = "on";
+      } else if (field.type === "radio_image") {
+        var chosen = els.creationForm.querySelector('input[name="' + field.var + '"]:checked');
+        if (chosen) answers[field.var] = chosen.value;
+      } else {
+        answers[field.var] = input.value;
+      }
+    });
+    return answers;
+  }
+
+  function startCreatedGame() {
+    api().start_new_game(state.gameDir, collectCreationAnswers()).then(function (context) {
+      if (context.error) {
+        showLibrary(context.error);
+        return;
+      }
+      els.creationPrompt.hidden = true;
+      state.playLayout = context.play_layout || "classic";
+      state.readerPrefs = context.reader_prefs || state.readerPrefs;
+      els.gameProseStyles.textContent = context.prose_styles || "";
+      applyNetworkResourcesNotice(context);
       applyBodyClasses();
       showPlayView();
       renderTurn(context);
@@ -177,6 +314,9 @@
     var detail = (context && context.plugin_denied_text) || "";
     els.trustPluginDetail.textContent = detail;
     els.trustPluginDetail.hidden = !detail;
+    // A game that has not been trusted still has its stylesheet injected,
+    // so it can still reach the network. Say so while the player decides.
+    applyNetworkResourcesNotice(context);
     els.trustPrompt.hidden = false;
   }
 
@@ -702,6 +842,8 @@
     els.openFolderButton.addEventListener("click", openFolderPicker);
     els.trustAccept.addEventListener("click", acceptTrust);
     els.trustDecline.addEventListener("click", declineTrust);
+    els.creationStart.addEventListener("click", startCreatedGame);
+    els.creationCancel.addEventListener("click", function () { showLibrary(); });
     els.backToLibrary.addEventListener("click", backToLibrary);
     els.doneLibraryButton.addEventListener("click", backToLibrary);
     els.undoButton.addEventListener("click", undoTurn);

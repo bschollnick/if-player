@@ -249,7 +249,7 @@ class InitialGlobalsTests(TestCase):
 
 
 class StrictExternalsTests(TestCase):
-    """Strict mode is a live host setting: it is threaded onto the session
+    """Strict mode is a live application setting: it is threaded onto the session
     so every later rebuild (undo, a panel hook) keeps the mode the game was
     opened with, and never travels in a save file."""
 

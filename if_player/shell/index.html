@@ -5,8 +5,11 @@
   This page is loaded by pywebview via a file:// URL (webview.settings
   ['ALLOW_FILE_URLS'] = True, set once by if_player/main.py). Every piece
   of state comes from PlayerAPI (if_player/player_api.py) through
-  window.pywebview.api.* calls -- app.js is the only script here, and it
-  never talks to a network. Two layouts (classic / three_column) are
+  window.pywebview.api.* calls -- app.js is the only script here. Out of
+  the box this application does not access the network; depending on the
+  choices of the game being played, it could be using resources from the
+  network -- a game's own styles.css is injected into #game-prose-styles
+  below, and CSS can reach a CDN. Two layouts (classic / three_column) are
   one set of markup with a CSS class swap rather than two separate HTML
   files -- see app.js's own applyBodyClasses().
 -->
@@ -47,6 +50,20 @@
   </div>
 </div>
 
+<!-- A game's own opening questions, from its manifest's NEW_GAME_FIELDS.
+     Shown once, before the first turn; a game with a save to resume
+     already carries its answers and never sees this. -->
+<div id="creation-prompt" hidden>
+  <div class="creation-box">
+    <h2 id="creation-title">Before you begin</h2>
+    <form id="creation-form" class="creation-fields"></form>
+    <div class="creation-buttons">
+      <button id="creation-cancel" type="button" class="button-ghost">Back</button>
+      <button id="creation-start" type="button" class="button-primary">Start</button>
+    </div>
+  </div>
+</div>
+
 <div id="play-view" hidden>
   <nav id="sidebar">
     <button id="back-to-library" type="button" title="Back to library">&larr; Library</button>
@@ -59,6 +76,9 @@
 
   <main id="story-column">
     <h1 id="story-title"></h1>
+    <!-- Shown when a game's manifest declares USES_NETWORK_RESOURCES.
+         Advisory only: the game says so, nothing here checks or blocks it. -->
+    <div id="network-resources-notice" class="notice" hidden></div>
     <div id="centre-header" class="centre-stats" hidden></div>
 
     <div id="transcript"></div>

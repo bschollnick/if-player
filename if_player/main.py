@@ -2,10 +2,10 @@
 
 Wires `PlayerAPI` (the `js_api` object) to a single pywebview window
 loading the static shell in `if_player/shell/`. This is the ONLY module
-that calls `webview.create_window()`/`webview.start()` -- `player_api.py`
-never imports `webview` itself except inside `pick_game_folder()`'s own
-narrow, documented exception (it needs the live window reference for
-the native folder dialog).
+that calls `webview.create_window()`/`webview.start()`. Two other modules
+reach for `webview` only to open a native file dialog, which needs the
+live window reference: `player_api.py`'s `pick_game_folder()` and
+`save_slots_api.py`'s import/export dialogs.
 """
 
 from __future__ import annotations

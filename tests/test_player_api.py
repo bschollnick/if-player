@@ -380,7 +380,7 @@ class TrustTests(PlayerAPITestCase):
         self.assertEqual(context["required_plugins"], ["some_plugin"])
 
     def test_a_game_shipping_no_screen_still_gets_one(self):
-        """The host lists what it can rather than prompting with nothing."""
+        """The application lists what it can rather than prompting with nothing."""
         context = self.api.open_game(str(self._game_needing_plugins()))
         self.assertTrue(context["needs_trust"])
         self.assertIn("some_plugin", context["plugin_denied_text"])
@@ -442,3 +442,76 @@ class PanelTests(PlayerAPITestCase):
 class FindCoverTests(PlayerAPITestCase):
     def test_a_game_with_no_cover_image_returns_none(self):
         self.assertIsNone(self.api.find_cover(str(SIMPLE_GAME)))
+
+
+class CharacterCreationTests(PlayerAPITestCase):
+    """A game declaring NEW_GAME_FIELDS asks before its first turn.
+
+    It asks ONCE. A game with a save to resume already carries the
+    answers, and re-asking would discard a playthrough.
+    """
+
+    FIELDS = """
+NEW_GAME_FIELDS:
+  - var: player_name
+    type: text
+    label: Name?
+    default: Morgan
+  - var: rich
+    type: checkbox
+    label: Start wealthy?
+    default: false
+    add_to:
+      coins: 50
+"""
+
+    def _game_with_fields(self) -> Path:
+        game = self.tmp / "asking" / "mygame"
+        shutil.copytree(SIMPLE_GAME, game)
+        manifest = game / "manifest.yaml"
+        manifest.write_text(manifest.read_text(encoding="utf-8") + self.FIELDS, encoding="utf-8")
+        return game
+
+    def test_a_game_declaring_fields_asks_before_starting(self):
+        result = self.api.open_game(str(self._game_with_fields()))
+
+        self.assertTrue(result.get("needs_character_creation"))
+        self.assertEqual([f["var"] for f in result["new_game_fields"]], ["player_name", "rich"])
+
+    def test_a_game_declaring_no_fields_opens_straight_away(self):
+        """The ordinary case must be untouched by this branch."""
+        game = self.tmp / "plain" / "mygame"
+        shutil.copytree(SIMPLE_GAME, game)
+
+        result = self.api.open_game(str(game))
+
+        self.assertNotIn("needs_character_creation", result)
+        self.assertIn("text", result)
+
+    def test_answering_starts_the_game_with_those_values(self):
+        game = self._game_with_fields()
+        self.api.open_game(str(game))
+
+        self.api.start_new_game(str(game), {"player_name": "Alice"})
+
+        self.assertEqual(self.api.session.state.globals.get("player_name"), "Alice")
+
+    def test_an_unanswered_field_takes_its_declared_default(self):
+        game = self._game_with_fields()
+        self.api.open_game(str(game))
+
+        self.api.start_new_game(str(game), {})
+
+        self.assertEqual(self.api.session.state.globals.get("player_name"), "Morgan")
+
+    def test_a_game_with_a_save_resumes_rather_than_asking_again(self):
+        """The failure this branch could cause: re-asking a player who is
+        mid-playthrough, then starting them over."""
+        game = self._game_with_fields()
+        self.api.open_game(str(game))
+        self.api.start_new_game(str(game), {"player_name": "Persist"})
+
+        result = self.api.open_game(str(game))
+
+        self.assertNotIn("needs_character_creation", result)
+        self.assertEqual(self.api.session.state.globals.get("player_name"), "Persist")
